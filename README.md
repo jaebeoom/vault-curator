@@ -54,7 +54,9 @@ Project-specific overrides can still live in `.env`, but the recommended setup i
 
 ## Configuration
 
-Main project config lives in `config.toml`.
+Use `config.example.toml` as a starting point for a local `config.toml`.
+
+`config.toml` is intentionally not tracked, so machine-specific paths do not end up in the public repo.
 
 Important sections:
 
@@ -90,6 +92,13 @@ python -m vault_curator.cli doctor
 
 For unattended daily runs on macOS, `launchd` is the intended scheduler.
 
+Template plist files live in `launchd/`:
+
+- `vault-curator.example.plist`
+- `vault-curator.retry.example.plist`
+
+Copy them locally, replace the placeholder paths, and install them into `~/Library/LaunchAgents/`.
+
 Recommended structure:
 
 - keep the executable working copy on a normal local path
@@ -124,6 +133,13 @@ Recommended split:
 
 `LOCAL_SETUP.md` is gitignored in this repo.
 
+Similarly:
+
+- `config.example.toml` is public
+- `config.toml` is local-only
+- launchd example plists are public
+- installed machine-specific plists are local-only
+
 ## Current Design Tradeoffs
 
 - curation quality is good enough for daily use
@@ -145,3 +161,7 @@ The project uses:
 - Typer
 - Rich
 - local OpenAI-compatible inference server
+
+## License
+
+This repository is released under the MIT License. See `LICENSE`.

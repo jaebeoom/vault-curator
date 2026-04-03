@@ -3,12 +3,12 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.nathan.vault-curator</string>
+  <string>com.example.vault-curator.retry</string>
 
   <key>ProgramArguments</key>
   <array>
     <string>/bin/zsh</string>
-    <string>/Users/nathan/Projects/vault-curator/scripts/daily-curate.sh</string>
+    <string>/ABSOLUTE/PATH/TO/vault-curator/scripts/retry-pending.sh</string>
   </array>
 
   <key>RunAtLoad</key>
@@ -17,15 +17,15 @@
   <key>StartCalendarInterval</key>
   <dict>
     <key>Hour</key>
-    <integer>16</integer>
+    <integer>3</integer>
     <key>Minute</key>
     <integer>30</integer>
   </dict>
 
   <key>StandardOutPath</key>
-  <string>/Users/nathan/Projects/vault-curator/logs/launchd.out.log</string>
+  <string>/ABSOLUTE/PATH/TO/vault-curator/logs/retry.out.log</string>
 
   <key>StandardErrorPath</key>
-  <string>/Users/nathan/Projects/vault-curator/logs/launchd.err.log</string>
+  <string>/ABSOLUTE/PATH/TO/vault-curator/logs/retry.err.log</string>
 </dict>
 </plist>

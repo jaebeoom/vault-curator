@@ -5,8 +5,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 BACKUP_SCRIPT="$PROJECT_DIR/scripts/sync-to-icloud.sh"
-CONDA_BIN="/Users/nathan/miniforge3/condabin/conda"
-SHARED_AI_ENV="/Users/nathan/Atelier/Projects/.shared-ai.env"
+CONDA_BIN="${CONDA_BIN:-$HOME/miniforge3/condabin/conda}"
+SHARED_AI_ENV="${SHARED_AI_ENV:-$HOME/Atelier/Projects/.shared-ai.env}"
 PENDING_FILE="$PROJECT_DIR/.curation-pending"
 
 cd "$PROJECT_DIR"
@@ -24,7 +24,7 @@ if [ -f "$PROJECT_DIR/.env" ]; then
 fi
 
 if [ -z "${OMLX_API_KEY:-}" ] && [ -z "${VAULT_CURATOR_LOCAL_API_KEY:-}" ]; then
-  echo "OMLX_API_KEY is not set. Add it to /Users/nathan/Atelier/Projects/.shared-ai.env."
+  echo "OMLX_API_KEY is not set. Add it to your shared AI env file."
   exit 1
 fi
 

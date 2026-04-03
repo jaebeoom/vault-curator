@@ -13,3 +13,5 @@ reports/
 .venv/
 logs/
 LOCAL_SETUP.md
+config.toml
+handover-vault-curator.md

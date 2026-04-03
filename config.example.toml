@@ -1,17 +1,17 @@
 [paths]
-vault_root = "~/Library/Mobile Documents/com~apple~CloudDocs/Atelier/Vault"
+vault_root = "~/path/to/your/Vault"
 haiku_dir = "Haiku"
 sonnet_dir = "Sonnet"
 polaris_dir = "Polaris/AI"
 reports_dir = "reports"
 
 [evaluation]
-model = "claude-sonnet-4-20250514"
+model = "your-evaluation-model-name"
 max_tokens_per_batch = 50000
 
 [local]
 base_url = "http://127.0.0.1:1234/v1"
-model = "MLX-Qwopus3.5-27B-v3-4bit"
+model = "your-local-model-name"
 
 [automation]
 interval_seconds = 300
