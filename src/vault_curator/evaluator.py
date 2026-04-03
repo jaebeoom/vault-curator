@@ -25,6 +25,36 @@ class SessionVerdict:
     sonnet_draft: dict[str, str] | None = None
 
 
+def _extract_json_text(text: str) -> str:
+    """응답에 fenced json 블록이 있으면 내부 JSON만 추출."""
+    json_match = re.search(r"```json\s*(.*?)\s*```", text, re.DOTALL)
+    if json_match:
+        return json_match.group(1)
+    return text
+
+
+def _normalize_connected_themes(value: Any) -> list[str]:
+    """모델 응답을 태그 문자열 리스트로 정규화."""
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str):
+        return [token for token in value.split() if token.strip()]
+    return []
+
+
+def _normalize_sonnet_draft(value: Any) -> dict[str, str] | None:
+    """모델 응답의 Sonnet draft 구조를 안전하게 정규화."""
+    if not isinstance(value, dict):
+        return None
+
+    return {
+        "summary": str(value.get("summary", "")).strip(),
+        "thought": str(value.get("thought", "")).strip(),
+        "connections": str(value.get("connections", "")).strip(),
+        "source": str(value.get("source", "")).strip(),
+    }
+
+
 EVALUATION_PROMPT = """\
 당신은 Obsidian Vault의 Haiku → Sonnet 승격을 판단하는 1차 필터입니다.
 
@@ -74,7 +104,7 @@ EVALUATION_PROMPT = """\
       "connected_themes": ["#tag1", "#tag2"],
       "sonnet_draft": {{
         "summary": "한 줄 요약",
-        "thought": "정제된 생각 본문 (3~5문장)",
+        "thought": "정제된 생각 본문 (정확히 4문장)",
         "connections": "연결되는 노트/개념 (백링크 형식)",
         "source": "이 생각의 출처/계기"
       }}
@@ -168,12 +198,7 @@ def build_prompt(
 
 def parse_verdicts(text: str) -> list[SessionVerdict]:
     """Claude Code의 평가 결과 JSON을 파싱."""
-    # ```json ... ``` 블록이 있으면 추출
-    json_match = re.search(r"```json\s*(.*?)\s*```", text, re.DOTALL)
-    if json_match:
-        text = json_match.group(1)
-
-    data: dict[str, Any] = json.loads(text)
+    data: dict[str, Any] = json.loads(_extract_json_text(text))
     items = data["sessions"]
 
     verdicts: list[SessionVerdict] = []
@@ -185,8 +210,12 @@ def parse_verdicts(text: str) -> list[SessionVerdict]:
                 reasoning=item["reasoning"],
                 core_idea=item.get("core_idea", ""),
                 suggested_title=item.get("suggested_title", ""),
-                connected_themes=item.get("connected_themes", []),
-                sonnet_draft=item.get("sonnet_draft"),
+                connected_themes=_normalize_connected_themes(
+                    item.get("connected_themes", [])
+                ),
+                sonnet_draft=_normalize_sonnet_draft(
+                    item.get("sonnet_draft")
+                ),
             )
         )
 
@@ -206,11 +235,7 @@ def build_polish_prompt(
 
 def parse_polished_sonnet(text: str) -> dict[str, str]:
     """Polish 단계의 JSON 응답을 파싱."""
-    json_match = re.search(r"```json\s*(.*?)\s*```", text, re.DOTALL)
-    if json_match:
-        text = json_match.group(1)
-
-    data: dict[str, Any] = json.loads(text)
+    data: dict[str, Any] = json.loads(_extract_json_text(text))
     return {
         "suggested_title": data.get("title", "").strip(),
         "summary": data.get("summary", "").strip(),

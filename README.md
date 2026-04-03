@@ -74,6 +74,14 @@ python -m vault_curator.cli local-run \
   --timeout-seconds 900
 ```
 
+Keep the final parsed JSON for inspection:
+
+```bash
+conda run -n vault-curator env PYTHONPATH=src \
+python -m vault_curator.cli local-run \
+  --keep-result
+```
+
 Watch mode:
 
 ```bash
@@ -149,10 +157,22 @@ Similarly:
 
 ## Development
 
+Install dev dependencies:
+
+```bash
+conda run -n vault-curator python -m pip install -e '.[dev]'
+```
+
 Compile-check:
 
 ```bash
 conda run -n vault-curator python -m compileall src
+```
+
+Run tests:
+
+```bash
+conda run -n vault-curator env PYTHONPATH=src pytest -q
 ```
 
 The project uses:

@@ -11,6 +11,7 @@ import json
 import os
 import time
 from pathlib import Path
+from typing import Annotated
 
 import typer
 from rich.console import Console
@@ -24,6 +25,46 @@ console = Console()
 _PROJECT_DIR = Path(__file__).resolve().parents[2]
 _PROMPT_FILE = _PROJECT_DIR / ".curator-prompt.md"
 _RESULT_FILE = _PROJECT_DIR / ".curator-result.json"
+
+SinceOption = Annotated[
+    str | None,
+    typer.Option(help="이 날짜 이후만 평가 (YYYY-MM-DD)"),
+]
+ForceOption = Annotated[bool, typer.Option(help="전체 재평가")]
+BaseUrlOption = Annotated[
+    str | None,
+    typer.Option(
+        help="OpenAI-호환 로컬 서버 base URL "
+        "(예: http://127.0.0.1:1234/v1)"
+    ),
+]
+ModelOption = Annotated[
+    str | None,
+    typer.Option(help="로컬 서버에서 사용할 모델명"),
+]
+ApiKeyOption = Annotated[
+    str | None,
+    typer.Option(help="필요할 경우 API 키"),
+]
+TemperatureOption = Annotated[
+    float, typer.Option(help="생성 temperature")
+]
+TimeoutOption = Annotated[int, typer.Option(help="요청 타임아웃(초)")]
+KeepResultOption = Annotated[
+    bool, typer.Option(help="원본 응답 JSON 파일을 유지")
+]
+PolishSonnetOption = Annotated[
+    bool,
+    typer.Option(help="strong_candidate Sonnet 초안을 한 번 더 다듬기"),
+]
+IntervalOption = Annotated[
+    int | None,
+    typer.Option(help="새 파일 확인 주기(초)"),
+]
+ResultFileOption = Annotated[
+    str | None,
+    typer.Option(help="평가 결과 JSON 파일 경로 (기본: .curator-result.json)"),
+]
 
 
 def _load_config() -> dict:
@@ -179,6 +220,83 @@ def _resolve_local_model_config(
     )
 
 
+def _generate_local_result(
+    prompt: str, model_cfg: local_client.LocalModelConfig
+) -> str:
+    """로컬 모델 1차 평가를 실행하고 결과 파일에 기록."""
+    console.print(
+        "[cyan]로컬 모델 평가 실행:[/cyan] "
+        f"{model_cfg.model} @ {model_cfg.base_url}"
+    )
+    result_text = local_client.generate_json(prompt, model_cfg)
+    _RESULT_FILE.write_text(result_text, encoding="utf-8")
+    console.print(f"로컬 평가 결과 저장: {_RESULT_FILE}")
+    return result_text
+
+
+def _polish_single_sonnet(
+    verdict: evaluator.SessionVerdict,
+    polaris_ctx: str,
+    model_cfg: local_client.LocalModelConfig,
+) -> None:
+    """단일 Sonnet draft를 polish 결과로 덮어쓴다."""
+    assert verdict.sonnet_draft is not None
+
+    draft_payload = {
+        "title": verdict.suggested_title,
+        "summary": verdict.sonnet_draft.get("summary", ""),
+        "thought": verdict.sonnet_draft.get("thought", ""),
+        "connections": verdict.sonnet_draft.get("connections", ""),
+        "source": verdict.sonnet_draft.get("source", ""),
+    }
+    polished = evaluator.parse_polished_sonnet(
+        local_client.generate_json(
+            evaluator.build_polish_prompt(draft_payload, polaris_ctx),
+            model_cfg,
+        )
+    )
+    verdict.suggested_title = (
+        polished["suggested_title"] or verdict.suggested_title
+    )
+    verdict.sonnet_draft = {
+        "summary": polished["summary"]
+        or verdict.sonnet_draft.get("summary", ""),
+        "thought": polished["thought"]
+        or verdict.sonnet_draft.get("thought", ""),
+        "connections": polished["connections"]
+        or verdict.sonnet_draft.get("connections", ""),
+        "source": polished["source"]
+        or verdict.sonnet_draft.get("source", ""),
+    }
+
+
+def _polish_sonnet_drafts(
+    cfg: dict,
+    model_cfg: local_client.LocalModelConfig,
+) -> str | None:
+    """strong_candidate Sonnet draft들을 polish하고 최종 JSON을 반환."""
+    raw = _RESULT_FILE.read_text(encoding="utf-8")
+    verdicts = evaluator.parse_verdicts(raw)
+    strong = [
+        v
+        for v in verdicts
+        if v.verdict == "strong_candidate" and v.sonnet_draft
+    ]
+    if not strong:
+        return None
+
+    console.print(f"[cyan]Sonnet polish 실행:[/cyan] {len(strong)}개 초안")
+    _, _, polaris_dir, _, _ = _resolve_paths(cfg)
+    polaris_ctx = context.load_polaris(polaris_dir)
+    for verdict in strong:
+        _polish_single_sonnet(verdict, polaris_ctx, model_cfg)
+
+    polished_result = evaluator.verdicts_to_json(verdicts)
+    _RESULT_FILE.write_text(polished_result, encoding="utf-8")
+    console.print("[green]Polish 적용 완료[/green]")
+    return polished_result
+
+
 def _run_local_cycle(
     cfg: dict,
     since: str | None,
@@ -194,80 +312,26 @@ def _run_local_cycle(
             return False
         raise
 
-    console.print(
-        "[cyan]로컬 모델 평가 실행:[/cyan] "
-        f"{model_cfg.model} @ {model_cfg.base_url}"
-    )
-    result = local_client.generate_json(prompt, model_cfg)
-    _RESULT_FILE.write_text(result, encoding="utf-8")
-    console.print(f"로컬 평가 결과 저장: {_RESULT_FILE}")
+    result_text = _generate_local_result(prompt, model_cfg)
+    final_result_text = result_text
 
     if polish_sonnet:
-        raw = _RESULT_FILE.read_text(encoding="utf-8")
-        verdicts = evaluator.parse_verdicts(raw)
-        strong = [
-            v
-            for v in verdicts
-            if v.verdict == "strong_candidate" and v.sonnet_draft
-        ]
-        if strong:
-            console.print(
-                f"[cyan]Sonnet polish 실행:[/cyan] {len(strong)}개 초안"
-            )
-            _, _, polaris_dir, _, _ = _resolve_paths(cfg)
-            polaris_ctx = context.load_polaris(polaris_dir)
-            for verdict in strong:
-                assert verdict.sonnet_draft is not None
-                draft_payload = {
-                    "title": verdict.suggested_title,
-                    "summary": verdict.sonnet_draft.get("summary", ""),
-                    "thought": verdict.sonnet_draft.get("thought", ""),
-                    "connections": verdict.sonnet_draft.get(
-                        "connections", ""
-                    ),
-                    "source": verdict.sonnet_draft.get("source", ""),
-                }
-                polished = evaluator.parse_polished_sonnet(
-                    local_client.generate_json(
-                        evaluator.build_polish_prompt(
-                            draft_payload, polaris_ctx
-                        ),
-                        model_cfg,
-                    )
-                )
-                verdict.suggested_title = (
-                    polished["suggested_title"] or verdict.suggested_title
-                )
-                verdict.sonnet_draft = {
-                    "summary": polished["summary"]
-                    or verdict.sonnet_draft.get("summary", ""),
-                    "thought": polished["thought"]
-                    or verdict.sonnet_draft.get("thought", ""),
-                    "connections": polished["connections"]
-                    or verdict.sonnet_draft.get("connections", ""),
-                    "source": polished["source"]
-                    or verdict.sonnet_draft.get("source", ""),
-                }
-            _RESULT_FILE.write_text(
-                evaluator.verdicts_to_json(verdicts),
-                encoding="utf-8",
-            )
-            console.print("[green]Polish 적용 완료[/green]")
+        polished_result = _polish_sonnet_drafts(cfg, model_cfg)
+        if polished_result is not None:
+            final_result_text = polished_result
 
     _finalize_result(cfg, _RESULT_FILE)
 
     if keep_result:
-        _RESULT_FILE.write_text(result, encoding="utf-8")
+        _RESULT_FILE.write_text(final_result_text, encoding="utf-8")
 
     return True
 
 
 @app.command()
 def prepare(
-    since: str | None = typer.Option(
-        None, help="이 날짜 이후만 평가 (YYYY-MM-DD)"
-    ),
-    force: bool = typer.Option(False, help="전체 재평가"),
+    since: SinceOption = None,
+    force: ForceOption = False,
 ) -> None:
     """Haiku를 파싱하고 평가 프롬프트를 생성합니다."""
     cfg = _load_config()
@@ -276,9 +340,7 @@ def prepare(
 
 @app.command()
 def finalize(
-    result_file: str = typer.Option(
-        None, help="평가 결과 JSON 파일 경로 (기본: .curator-result.json)"
-    ),
+    result_file: ResultFileOption = None,
 ) -> None:
     """평가 결과 JSON을 읽어 리포트와 Sonnet 노트를 생성합니다."""
     cfg = _load_config()
@@ -296,31 +358,15 @@ def finalize(
 
 @app.command("local-run")
 def local_run(
-    since: str | None = typer.Option(
-        None, help="이 날짜 이후만 평가 (YYYY-MM-DD)"
-    ),
-    force: bool = typer.Option(False, help="전체 재평가"),
-    base_url: str | None = typer.Option(
-        None,
-        help="OpenAI-호환 로컬 서버 base URL "
-        "(예: http://127.0.0.1:1234/v1)",
-    ),
-    model: str | None = typer.Option(
-        None,
-        help="로컬 서버에서 사용할 모델명",
-    ),
-    api_key: str | None = typer.Option(
-        None,
-        help="필요할 경우 API 키",
-    ),
-    temperature: float = typer.Option(0.2, help="생성 temperature"),
-    timeout_seconds: int = typer.Option(180, help="요청 타임아웃(초)"),
-    keep_result: bool = typer.Option(
-        False, help="원본 응답 JSON 파일을 유지"
-    ),
-    polish_sonnet: bool = typer.Option(
-        True, help="strong_candidate Sonnet 초안을 한 번 더 다듬기"
-    ),
+    since: SinceOption = None,
+    force: ForceOption = False,
+    base_url: BaseUrlOption = None,
+    model: ModelOption = None,
+    api_key: ApiKeyOption = None,
+    temperature: TemperatureOption = 0.2,
+    timeout_seconds: TimeoutOption = 180,
+    keep_result: KeepResultOption = False,
+    polish_sonnet: PolishSonnetOption = True,
 ) -> None:
     """로컬 AI로 평가를 실행하고 바로 리포트/Sonnet까지 생성합니다."""
     cfg = _load_config()
@@ -338,33 +384,15 @@ def local_run(
 
 @app.command("watch-local")
 def watch_local(
-    since: str | None = typer.Option(
-        None, help="이 날짜 이후만 평가 (YYYY-MM-DD)"
-    ),
-    interval_seconds: int | None = typer.Option(
-        None, help="새 파일 확인 주기(초)"
-    ),
-    base_url: str | None = typer.Option(
-        None,
-        help="OpenAI-호환 로컬 서버 base URL "
-        "(예: http://127.0.0.1:1234/v1)",
-    ),
-    model: str | None = typer.Option(
-        None,
-        help="로컬 서버에서 사용할 모델명",
-    ),
-    api_key: str | None = typer.Option(
-        None,
-        help="필요할 경우 API 키",
-    ),
-    temperature: float = typer.Option(0.2, help="생성 temperature"),
-    timeout_seconds: int = typer.Option(180, help="요청 타임아웃(초)"),
-    keep_result: bool = typer.Option(
-        False, help="원본 응답 JSON 파일을 유지"
-    ),
-    polish_sonnet: bool = typer.Option(
-        True, help="strong_candidate Sonnet 초안을 한 번 더 다듬기"
-    ),
+    since: SinceOption = None,
+    interval_seconds: IntervalOption = None,
+    base_url: BaseUrlOption = None,
+    model: ModelOption = None,
+    api_key: ApiKeyOption = None,
+    temperature: TemperatureOption = 0.2,
+    timeout_seconds: TimeoutOption = 180,
+    keep_result: KeepResultOption = False,
+    polish_sonnet: PolishSonnetOption = True,
 ) -> None:
     """새 Haiku를 계속 감시하며 로컬 AI로 자동 큐레이팅합니다."""
     cfg = _load_config()
