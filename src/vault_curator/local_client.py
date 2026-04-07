@@ -18,6 +18,7 @@ class LocalModelConfig:
     api_key: str | None = None
     temperature: float = 0.2
     timeout_seconds: int = 180
+    max_output_tokens: int | None = None
 
     @property
     def endpoint(self) -> str:
@@ -35,7 +36,10 @@ def generate_json(prompt: str, cfg: LocalModelConfig) -> str:
             }
         ],
         "temperature": cfg.temperature,
+        "response_format": {"type": "json_object"},
     }
+    if cfg.max_output_tokens is not None:
+        payload["max_tokens"] = cfg.max_output_tokens
 
     headers = {"Content-Type": "application/json"}
     if cfg.api_key:
@@ -59,6 +63,10 @@ def generate_json(prompt: str, cfg: LocalModelConfig) -> str:
     except error.URLError as exc:
         raise LocalModelError(
             f"Could not reach local model endpoint: {cfg.endpoint}"
+        ) from exc
+    except TimeoutError as exc:
+        raise LocalModelError(
+            f"Timed out while calling local model: {cfg.endpoint}"
         ) from exc
 
     try:

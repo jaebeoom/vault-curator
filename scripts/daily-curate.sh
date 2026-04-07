@@ -40,9 +40,11 @@ if "$CONDA_BIN" run -n vault-curator env PYTHONPATH=src \
   rm -f "$PENDING_FILE"
 else
   cat "$tmp_log"
+  date +"%Y-%m-%d %H:%M:%S" >"$PENDING_FILE"
   if grep -q "HTTP 507" "$tmp_log"; then
-    date +"%Y-%m-%d %H:%M:%S" >"$PENDING_FILE"
     echo "Memory pressure detected (HTTP 507). Marked pending for overnight retry."
+  else
+    echo "Curation failed. Marked pending for retry."
   fi
   rm -f "$tmp_log"
   exit 1

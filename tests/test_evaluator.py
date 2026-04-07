@@ -1,4 +1,5 @@
 from vault_curator import evaluator
+from vault_curator.parser import HaikuSession
 
 
 def test_parse_verdicts_extracts_fenced_json_and_normalizes_fields() -> None:
@@ -79,3 +80,103 @@ def test_parse_polished_sonnet_extracts_fenced_json() -> None:
         "connections": "개념1, 개념2",
         "source": "출처",
     }
+
+
+def test_parse_verdicts_extracts_json_inside_plain_text_wrapper() -> None:
+    text = """
+    아래가 결과입니다.
+    {
+      "sessions": [
+        {
+          "session_id": "2026-04-05_0900",
+          "verdict": "skip",
+          "reasoning": "테스트",
+          "connected_themes": []
+        }
+      ]
+    }
+    감사합니다.
+    """
+
+    verdicts = evaluator.parse_verdicts(text)
+
+    assert len(verdicts) == 1
+    assert verdicts[0].session_id == "2026-04-05_0900"
+
+
+def test_build_prompt_compresses_long_ai_turns() -> None:
+    session = HaikuSession(
+        date="2026-04-05",
+        time="09:00",
+        model="test-model",
+        raw_text="\n".join(
+            [
+                "## AI 세션 (09:00, test-model)",
+                "**나**",
+                "내 생각은 이렇다.",
+                "**AI**: " + ("설명 " * 200),
+            ]
+        ),
+        tags=["#haiku"],
+        user_turns=1,
+        ai_turns=1,
+    )
+
+    prompt = evaluator.build_prompt([session], "context")
+
+    assert "내 생각은 이렇다." in prompt
+    assert "...[truncated]" in prompt
+
+
+def test_split_session_batches_respects_token_budget() -> None:
+    polaris_context = "context"
+    sessions = [
+        HaikuSession(
+            date="2026-04-07",
+            time=f"0{i}:00",
+            model="test-model",
+            user_turns=2,
+            ai_turns=2,
+            tags=["#haiku"],
+            raw_text="가" * 12000,
+        )
+        for i in range(1, 4)
+    ]
+
+    batches = evaluator.split_session_batches(
+        sessions,
+        polaris_context,
+        max_tokens_per_batch=6000,
+    )
+
+    assert len(batches) == 3
+    assert [batch[0].session_id for batch in batches] == [
+        "2026-04-07_01:00",
+        "2026-04-07_02:00",
+        "2026-04-07_03:00",
+    ]
+
+
+def test_split_session_batches_keeps_small_sessions_together() -> None:
+    polaris_context = "context"
+    sessions = [
+        HaikuSession(
+            date="2026-04-07",
+            time=f"0{i}:00",
+            model="test-model",
+            user_turns=1,
+            ai_turns=1,
+            tags=["#haiku"],
+            raw_text="짧은 세션",
+        )
+        for i in range(1, 4)
+    ]
+
+    batches = evaluator.split_session_batches(
+        sessions,
+        polaris_context,
+        max_tokens_per_batch=8000,
+    )
+
+    assert len(batches) == 1
+    assert len(batches[0]) == 3

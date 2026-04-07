@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Annotated
 
@@ -117,9 +118,17 @@ def _prepare_prompt(
     cfg: dict,
     since: str | None,
     force: bool,
-) -> str:
+) -> tuple[str, list[list[parser.HaikuSession]]]:
     haiku_dir, _, polaris_dir, _, _ = _resolve_paths(cfg)
     files = _select_files(haiku_dir, since, force)
+    return _prepare_prompt_for_files(cfg, files)
+
+
+def _prepare_prompt_for_files(
+    cfg: dict,
+    files: list[Path],
+) -> tuple[str, list[list[parser.HaikuSession]]]:
+    _, _, polaris_dir, _, _ = _resolve_paths(cfg)
 
     all_sessions: list[parser.HaikuSession] = []
     for f in files:
@@ -128,16 +137,32 @@ def _prepare_prompt(
     console.print(f"파일 {len(files)}개, 세션 {len(all_sessions)}개 발견")
 
     polaris_ctx = context.load_polaris(polaris_dir)
-    prompt = evaluator.build_prompt(all_sessions, polaris_ctx)
+    max_tokens_per_batch = cfg.get("evaluation", {}).get(
+        "max_tokens_per_batch", 32000
+    )
+    session_batches = evaluator.split_session_batches(
+        all_sessions, polaris_ctx, max_tokens_per_batch
+    )
+    prompt_chunks = [
+        evaluator.build_prompt(batch, polaris_ctx) for batch in session_batches
+    ]
+    prompt = prompt_chunks[0] if len(prompt_chunks) == 1 else "\n\n".join(
+        [
+            f"# Batch {index}/{len(prompt_chunks)}\n\n{chunk}"
+            for index, chunk in enumerate(prompt_chunks, 1)
+        ]
+    )
 
     _PROMPT_FILE.write_text(prompt, encoding="utf-8")
-    console.print(f"평가 프롬프트 생성: {_PROMPT_FILE}")
+    console.print(
+        f"평가 프롬프트 생성: {_PROMPT_FILE} (배치 {len(prompt_chunks)}개)"
+    )
 
     meta = {"files": [str(f) for f in files]}
     (_PROJECT_DIR / ".curator-meta.json").write_text(
         json.dumps(meta, ensure_ascii=False), encoding="utf-8"
     )
-    return prompt
+    return prompt, session_batches
 
 
 def _finalize_result(cfg: dict, rfile: Path) -> None:
@@ -220,15 +245,72 @@ def _resolve_local_model_config(
     )
 
 
+def _should_split_batch(exc: local_client.LocalModelError) -> bool:
+    detail = str(exc)
+    return "Prompt too long" in detail or "Timed out while calling local model" in detail
+
+
+def _evaluate_session_batch(
+    sessions: list[parser.HaikuSession],
+    polaris_ctx: str,
+    model_cfg: local_client.LocalModelConfig,
+    batch_label: str,
+) -> list[evaluator.SessionVerdict]:
+    prompt = evaluator.build_prompt(sessions, polaris_ctx)
+    console.print(
+        f"[cyan]로컬 모델 평가 실행:[/cyan] "
+        f"{model_cfg.model} @ {model_cfg.base_url} ({batch_label})"
+    )
+    try:
+        result_text = local_client.generate_json(prompt, model_cfg)
+        return evaluator.parse_verdicts(result_text)
+    except local_client.LocalModelError as exc:
+        if len(sessions) <= 1 or not _should_split_batch(exc):
+            raise
+        midpoint = len(sessions) // 2
+        console.print(
+            f"[yellow]배치 재분할:[/yellow] {batch_label} "
+            f"({len(sessions)}개 세션)"
+        )
+        left = _evaluate_session_batch(
+            sessions[:midpoint],
+            polaris_ctx,
+            model_cfg,
+            f"{batch_label}.1",
+        )
+        right = _evaluate_session_batch(
+            sessions[midpoint:],
+            polaris_ctx,
+            model_cfg,
+            f"{batch_label}.2",
+        )
+        return left + right
+
+
 def _generate_local_result(
-    prompt: str, model_cfg: local_client.LocalModelConfig
+    session_batches: list[list[parser.HaikuSession]],
+    polaris_ctx: str,
+    model_cfg: local_client.LocalModelConfig,
 ) -> str:
     """로컬 모델 1차 평가를 실행하고 결과 파일에 기록."""
-    console.print(
-        "[cyan]로컬 모델 평가 실행:[/cyan] "
-        f"{model_cfg.model} @ {model_cfg.base_url}"
-    )
-    result_text = local_client.generate_json(prompt, model_cfg)
+    all_verdicts: list[evaluator.SessionVerdict] = []
+
+    for index, batch in enumerate(session_batches, 1):
+        label = (
+            "배치 1/1"
+            if len(session_batches) == 1
+            else f"배치 {index}/{len(session_batches)}"
+        )
+        all_verdicts.extend(
+            _evaluate_session_batch(
+                batch,
+                polaris_ctx,
+                replace(model_cfg, max_output_tokens=1600),
+                label,
+            )
+        )
+
+    result_text = evaluator.verdicts_to_json(all_verdicts)
     _RESULT_FILE.write_text(result_text, encoding="utf-8")
     console.print(f"로컬 평가 결과 저장: {_RESULT_FILE}")
     return result_text
@@ -252,7 +334,7 @@ def _polish_single_sonnet(
     polished = evaluator.parse_polished_sonnet(
         local_client.generate_json(
             evaluator.build_polish_prompt(draft_payload, polaris_ctx),
-            model_cfg,
+            replace(model_cfg, max_output_tokens=1000),
         )
     )
     verdict.suggested_title = (
@@ -297,6 +379,46 @@ def _polish_sonnet_drafts(
     return polished_result
 
 
+def _generate_sonnet_drafts(
+    verdicts: list[evaluator.SessionVerdict],
+    sessions: list[parser.HaikuSession],
+    polaris_ctx: str,
+    model_cfg: local_client.LocalModelConfig,
+) -> list[evaluator.SessionVerdict]:
+    """strong_candidate에 대해서만 Sonnet 초안을 개별 생성한다."""
+    session_map = {session.session_id: session for session in sessions}
+    draft_cfg = replace(model_cfg, max_output_tokens=1000)
+
+    for verdict in verdicts:
+        if verdict.verdict != "strong_candidate":
+            continue
+        session = session_map.get(verdict.session_id)
+        if session is None:
+            continue
+        console.print(
+            f"[cyan]Sonnet 초안 생성:[/cyan] {verdict.session_id}"
+        )
+        draft = evaluator.parse_polished_sonnet(
+            local_client.generate_json(
+                evaluator.build_sonnet_draft_prompt(
+                    verdict, session, polaris_ctx
+                ),
+                draft_cfg,
+            )
+        )
+        verdict.suggested_title = (
+            draft["suggested_title"] or verdict.suggested_title
+        )
+        verdict.sonnet_draft = {
+            "summary": draft["summary"],
+            "thought": draft["thought"],
+            "connections": draft["connections"],
+            "source": draft["source"],
+        }
+
+    return verdicts
+
+
 def _run_local_cycle(
     cfg: dict,
     since: str | None,
@@ -305,27 +427,49 @@ def _run_local_cycle(
     keep_result: bool,
     polish_sonnet: bool,
 ) -> bool:
+    haiku_dir, _, _, _, _ = _resolve_paths(cfg)
+    _, _, polaris_dir, _, _ = _resolve_paths(cfg)
+    polaris_ctx = context.load_polaris(polaris_dir)
     try:
-        prompt = _prepare_prompt(cfg, since, force)
+        files = _select_files(haiku_dir, since, force)
     except typer.Exit as exc:
         if exc.exit_code == 0:
             return False
         raise
 
-    result_text = _generate_local_result(prompt, model_cfg)
-    final_result_text = result_text
+    processed = False
+    total_files = len(files)
 
-    if polish_sonnet:
-        polished_result = _polish_sonnet_drafts(cfg, model_cfg)
-        if polished_result is not None:
-            final_result_text = polished_result
-
-    _finalize_result(cfg, _RESULT_FILE)
-
-    if keep_result:
+    for index, file in enumerate(files, 1):
+        console.print(
+            f"[bold cyan]파일 처리 중[/bold cyan] {index}/{total_files}: "
+            f"{file.name}"
+        )
+        sessions = parser.parse_file(file)
+        _, session_batches = _prepare_prompt_for_files(cfg, [file])
+        result_text = _generate_local_result(
+            session_batches, polaris_ctx, model_cfg
+        )
+        verdicts = evaluator.parse_verdicts(result_text)
+        verdicts = _generate_sonnet_drafts(
+            verdicts, sessions, polaris_ctx, model_cfg
+        )
+        final_result_text = evaluator.verdicts_to_json(verdicts)
         _RESULT_FILE.write_text(final_result_text, encoding="utf-8")
 
-    return True
+        if polish_sonnet:
+            polished_result = _polish_sonnet_drafts(cfg, model_cfg)
+            if polished_result is not None:
+                final_result_text = polished_result
+
+        _finalize_result(cfg, _RESULT_FILE)
+
+        if keep_result:
+            _RESULT_FILE.write_text(final_result_text, encoding="utf-8")
+
+        processed = True
+
+    return processed
 
 
 @app.command()

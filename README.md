@@ -15,23 +15,26 @@ The project is designed around a simple idea:
 - Haiku parsing from daily markdown files
 - context-aware curation using Polaris context files
 - promotion decisions: `strong_candidate`, `borderline`, `skip`
-- Sonnet draft generation
+- adaptive batch splitting for long local-model runs
+- file-by-file incremental processing of only new or changed Haiku files
+- two-stage Sonnet generation: verdict first, draft generation only for `strong_candidate`
 - optional Sonnet polish step tuned to the user's writing voice
 - report generation
-- incremental processing of only new or changed Haiku files
 
 ## Workflow
 
 The default flow is:
 
 1. Read new or changed files from `Vault/Haiku`
-2. Parse sessions
-3. Build a curation prompt with Polaris context
-4. Send the prompt to a local OpenAI-compatible endpoint
-5. Parse verdict JSON
-6. For `strong_candidate` sessions, run a polish pass by default
-7. Write a review report
-8. Write Sonnet notes into `Vault/Sonnet`
+2. Process one changed Haiku file at a time
+3. Parse sessions
+4. Build curation prompts with Polaris context
+5. Split large session sets into smaller batches for the local model
+6. Send verdict-only evaluation prompts to a local OpenAI-compatible endpoint
+7. For `strong_candidate` sessions, generate Sonnet drafts in separate follow-up calls
+8. Run a polish pass by default
+9. Write a review report
+10. Write Sonnet notes into `Vault/Sonnet`
 
 ## Local Model Configuration
 
@@ -61,6 +64,7 @@ Use `config.example.toml` as a starting point for a local `config.toml`.
 Important sections:
 
 - `[paths]`: where Haiku, Sonnet, Polaris, and reports live
+- `[evaluation]`: evaluation model and batch-size budget for local runs
 - `[local]`: default local endpoint/model fallback
 - `[automation]`: polling interval used by watch mode
 
@@ -152,8 +156,9 @@ Similarly:
 
 - curation quality is good enough for daily use
 - Sonnet generation is strongest when polish is enabled
-- local models work best when draft extraction and stylistic polish are separated
-- long sessions can still hit local memory limits depending on the serving setup
+- local models are more reliable when verdicting, draft generation, and polish are separated
+- long sessions are compressed and batched conservatively, which improves stability at the cost of speed
+- automation favors eventual completion over immediate per-session execution
 
 ## Development
 

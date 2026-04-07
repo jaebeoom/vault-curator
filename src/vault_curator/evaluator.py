@@ -27,10 +27,24 @@ class SessionVerdict:
 
 def _extract_json_text(text: str) -> str:
     """응답에 fenced json 블록이 있으면 내부 JSON만 추출."""
+    stripped = text.strip()
     json_match = re.search(r"```json\s*(.*?)\s*```", text, re.DOTALL)
     if json_match:
         return json_match.group(1)
-    return text
+    if stripped.startswith("{") or stripped.startswith("["):
+        return stripped
+
+    object_start = stripped.find("{")
+    object_end = stripped.rfind("}")
+    if object_start != -1 and object_end != -1 and object_start < object_end:
+        return stripped[object_start : object_end + 1]
+
+    array_start = stripped.find("[")
+    array_end = stripped.rfind("]")
+    if array_start != -1 and array_end != -1 and array_start < array_end:
+        return stripped[array_start : array_end + 1]
+
+    return stripped
 
 
 def _normalize_connected_themes(value: Any) -> list[str]:
@@ -101,37 +115,60 @@ EVALUATION_PROMPT = """\
       "reasoning": "판정 이유 (2~3문장, 한국어)",
       "core_idea": "핵심 아이디어 한 줄 (strong_candidate만)",
       "suggested_title": "제안 Sonnet 제목 (strong_candidate만)",
-      "connected_themes": ["#tag1", "#tag2"],
-      "sonnet_draft": {{
-        "summary": "한 줄 요약",
-        "thought": "정제된 생각 본문 (정확히 4문장)",
-        "connections": "연결되는 노트/개념 (백링크 형식)",
-        "source": "이 생각의 출처/계기"
-      }}
+      "connected_themes": ["#tag1", "#tag2"]
     }}
   ]
 }}
 ```
+"""
 
-sonnet_draft는 strong_candidate인 경우에만 포함하세요.
+
+SONNET_DRAFT_PROMPT = """\
+당신은 Obsidian Vault의 Haiku 세션에서 Sonnet 초안을 뽑아내는 작성 보조입니다.
+
+## 유저 컨텍스트
+{polaris_context}
+
+## 작업 목표
+- 아래 세션은 이미 strong_candidate로 판정되었습니다.
+- 이 세션을 바탕으로 Vault/Sonnet에 들어갈 **정제된 사고 조각** 초안을 JSON으로 작성하세요.
+- 대화 요약이 아니라 유저 자신의 주장과 프레임을 전면에 놓으세요.
 
 ## Sonnet 초안 작성 규칙
-- sonnet_draft는 **대화 요약문**이 아니라, Vault/Sonnet에 들어갈 **정제된 사고 조각**이어야 합니다.
-- 유저의 Writing Voice를 반드시 따르세요. 특히:
-  - 자기 지칭은 가능하면 **"필자"**를 사용할 것
+- 유저의 Writing Voice를 따르세요. 특히:
+  - 자기 지칭은 가능하면 **"필자"**
   - 학술적이되 딱딱하지 않은 문어체
   - 통념 제시 → 한계 지적 → 대안 프레임 제시 → 사례의 흐름
-  - 필요할 때만 짧은 단문으로 강조
-  - 감정 과잉, 인터넷 구어체, 과장된 자기확신 금지
-- `thought`는 정확히 4문장으로 작성하세요.
+- `thought`는 정확히 4문장
   - 1문장: 통념 또는 기존 playbook 제시
   - 2문장: 그 한계 또는 이번 사례의 이탈 지점 지적
   - 3문장: 대안 프레임 제시. 가능하면 "다시 말해,"로 시작
   - 4문장: 열린 질문, 경고, 혹은 향후 판단 기준으로 마무리
-- `thought`에서는 **유저 자신의 주장**이 전면에 와야 하며, 단순 사실 요약을 피하세요.
-- 가능하면 "다시 말해," 같은 유저 특유의 연결 방식을 자연스럽게 반영하세요.
-- `connections`는 1~3개의 plain text 개념 또는 확실한 기존 노트명만 적으세요. 확실하지 않으면 임의의 위키링크를 만들지 마세요.
-- `source`는 "어떤 Haiku 세션에서 어떤 문제의식이 출발점이 되었는가"를 한 문장으로 간결히 적으세요.
+- `connections`는 1~3개의 plain text 개념 또는 확실한 기존 노트명만
+- 새로운 사실이나 근거를 임의로 추가하지 마세요.
+
+## 판정 메모
+- session_id: {session_id}
+- suggested_title: {suggested_title}
+- core_idea: {core_idea}
+- connected_themes: {connected_themes}
+- reasoning: {reasoning}
+
+## 원본 세션
+{session_text}
+
+## 출력 형식
+반드시 아래 JSON 형식으로만 응답하세요.
+
+```json
+{{
+  "title": "제안 Sonnet 제목",
+  "summary": "한 줄 요약",
+  "thought": "정제된 생각 본문 4문장",
+  "connections": "연결되는 개념 1~3개",
+  "source": "출처/계기 한 문장"
+}}
+```
 """
 
 
@@ -190,10 +227,99 @@ def build_prompt(
             f"## 세션 {i}: {s.session_id} (모델: {s.model})\n"
             f"유저 턴: {s.user_turns}, AI 턴: {s.ai_turns}\n"
             f"태그: {' '.join(s.tags)}\n\n"
-            f"{s.raw_text}\n\n"
+            f"{_compress_session_text(s.raw_text)}\n\n"
             f"---\n"
         )
     return "\n".join(parts)
+
+
+def _compress_session_text(text: str) -> str:
+    """긴 세션은 유저 발화를 우선 보존하고 AI 응답은 압축한다."""
+    lines = text.splitlines()
+    compressed: list[str] = []
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("## AI 세션"):
+            compressed.append(line)
+            continue
+        if stripped.startswith("**나**"):
+            compressed.append(line)
+            continue
+        if stripped.startswith("**AI**:"):
+            body = stripped[len("**AI**:") :].strip()
+            if body:
+                compressed.append(
+                    f"**AI**: {body[:40].rstrip()} ...[truncated]"
+                )
+            else:
+                compressed.append("**AI**: ...[truncated]")
+            continue
+        if stripped.startswith("#"):
+            compressed.append(line)
+            continue
+        if compressed and compressed[-1].startswith("**나**"):
+            compressed.append(line)
+            continue
+
+    merged = "\n".join(compressed)
+    if len(merged) <= 3000:
+        return merged
+
+    head = merged[:2200].rstrip()
+    tail = merged[-600:].lstrip()
+    return (
+        f"{head}\n\n"
+        "[...session truncated for length; preserved user turns and tail context...]\n\n"
+        f"{tail}"
+    )
+
+
+def _estimate_token_count(text: str) -> int:
+    """한국어/영어 혼합 텍스트의 대략적인 토큰 수를 추정."""
+    return max(1, len(text) // 2)
+
+
+def split_session_batches(
+    sessions: list[HaikuSession],
+    polaris_context: str,
+    max_tokens_per_batch: int,
+) -> list[list[HaikuSession]]:
+    """평가 세션을 컨텍스트 한도에 맞게 여러 배치로 나눈다."""
+    if not sessions:
+        return []
+
+    safe_limit = max(4000, max_tokens_per_batch - 4000)
+    system = EVALUATION_PROMPT.format(polaris_context=polaris_context)
+    header = f"{system}\n---\n\n# 평가 대상 세션\n"
+    base_tokens = _estimate_token_count(header)
+
+    batches: list[list[HaikuSession]] = []
+    current_batch: list[HaikuSession] = []
+    current_tokens = base_tokens
+
+    for index, session in enumerate(sessions, 1):
+        session_block = (
+            f"## 세션 {index}: {session.session_id} (모델: {session.model})\n"
+            f"유저 턴: {session.user_turns}, AI 턴: {session.ai_turns}\n"
+            f"태그: {' '.join(session.tags)}\n\n"
+            f"{session.raw_text}\n\n"
+            f"---\n"
+        )
+        session_tokens = _estimate_token_count(session_block)
+
+        if current_batch and current_tokens + session_tokens > safe_limit:
+            batches.append(current_batch)
+            current_batch = []
+            current_tokens = base_tokens
+
+        current_batch.append(session)
+        current_tokens += session_tokens
+
+    if current_batch:
+        batches.append(current_batch)
+
+    return batches
 
 
 def parse_verdicts(text: str) -> list[SessionVerdict]:
@@ -243,6 +369,23 @@ def parse_polished_sonnet(text: str) -> dict[str, str]:
         "connections": data.get("connections", "").strip(),
         "source": data.get("source", "").strip(),
     }
+
+
+def build_sonnet_draft_prompt(
+    verdict: SessionVerdict,
+    session: HaikuSession,
+    polaris_context: str,
+) -> str:
+    """strong_candidate 세션에서 Sonnet 초안을 생성하는 프롬프트."""
+    return SONNET_DRAFT_PROMPT.format(
+        polaris_context=polaris_context,
+        session_id=verdict.session_id,
+        suggested_title=verdict.suggested_title,
+        core_idea=verdict.core_idea,
+        connected_themes=" ".join(verdict.connected_themes),
+        reasoning=verdict.reasoning,
+        session_text=_compress_session_text(session.raw_text),
+    )
 
 
 def verdicts_to_json(verdicts: list[SessionVerdict]) -> str:
