@@ -19,6 +19,7 @@ The project is designed around a simple idea:
 - session-level incremental processing backed by persisted state
 - two-stage Sonnet generation: verdict first, draft generation only for `strong_candidate`
 - optional Sonnet polish step tuned to the user's writing voice
+- Sonnet admission gate that blocks structurally invalid drafts before Vault write
 - deferred reporting when a strong candidate cannot yet be drafted safely
 - timestamped reports plus canonical by-date rollups
 
@@ -34,8 +35,9 @@ The default flow is:
 6. Send verdict-only evaluation prompts to a local OpenAI-compatible endpoint
 7. For `strong_candidate` sessions, generate Sonnet drafts in separate follow-up calls
 8. Run a polish pass by default
-9. Write a review report
-10. Write Sonnet notes into `Vault/Sonnet`
+9. Run an admission gate before Sonnet write
+10. Write a review report
+11. Write only admitted Sonnet notes into `Vault/Sonnet`
 
 ## Architecture
 
@@ -46,6 +48,7 @@ The CLI is intentionally thin and delegates to focused modules:
 - `preparation.py`: pending-session selection and prompt/meta generation
 - `evaluation_runner.py`: local-model verdict execution and batch splitting
 - `drafting.py`: Sonnet draft generation, compact fallback, and polish
+- `sonnet_gate.py`: deterministic Sonnet admission checks before write
 - `finalization.py`: reports, Sonnet note writes, and state updates
 - `pipeline.py`: file-level orchestration
 
@@ -128,6 +131,20 @@ Environment check:
 ```bash
 PYTHONPATH=src uv run python -m vault_curator.cli doctor
 ```
+
+## Admission Gate
+
+Before a generated Sonnet note is written into `Vault/Sonnet`, `vault-curator` runs a deterministic admission gate.
+
+The gate currently blocks drafts when they have obvious structural problems such as:
+
+- empty title
+- missing required fields like `summary`, `thought`, or `source`
+- a `thought` body that is not exactly four sentences
+- placeholder-style text such as `TBD`
+- title or filepath conflicts with existing Sonnet notes
+
+Blocked drafts are not written into the vault. Instead they are listed in the report under `Blocked by Admission Gate`, and they are not marked as completed in state so they can be revisited on a later run.
 
 ## Automation
 

@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 from vault_curator.evaluator import SessionVerdict
+from vault_curator.sonnet_gate import BlockedSonnetDraft
 
 _SESSION_MARKER_TEMPLATE = "<!-- vault-curator:session_id={session_id} -->"
 _LEGACY_SOURCE_TEMPLATE = re.compile(
@@ -20,6 +21,7 @@ def generate_report(
     reports_dir: Path,
     expected_session_count: int | None = None,
     deferred_sessions: dict[str, str] | None = None,
+    blocked_drafts: list[BlockedSonnetDraft] | None = None,
 ) -> Path:
     """마크다운 리포트를 생성하고 파일 경로를 반환."""
     reports_dir.mkdir(parents=True, exist_ok=True)
@@ -32,6 +34,7 @@ def generate_report(
         now,
         expected_session_count=expected_session_count,
         deferred_sessions=deferred_sessions,
+        blocked_drafts=blocked_drafts,
     )
     report_path.write_text(content, encoding="utf-8")
     return report_path
@@ -43,6 +46,7 @@ def write_source_rollup(
     source_date: str,
     expected_session_count: int | None = None,
     deferred_sessions: dict[str, str] | None = None,
+    blocked_drafts: list[BlockedSonnetDraft] | None = None,
 ) -> Path:
     """소스 날짜별 최신 상태를 덮어쓰는 canonical rollup을 작성."""
     rollup_dir = reports_dir / "by-date"
@@ -53,6 +57,7 @@ def write_source_rollup(
         datetime.now(),
         expected_session_count=expected_session_count,
         deferred_sessions=deferred_sessions,
+        blocked_drafts=blocked_drafts,
     )
     report_path.write_text(content, encoding="utf-8")
     return report_path
@@ -63,8 +68,10 @@ def _build_report_markdown(
     now: datetime,
     expected_session_count: int | None = None,
     deferred_sessions: dict[str, str] | None = None,
+    blocked_drafts: list[BlockedSonnetDraft] | None = None,
 ) -> str:
     deferred_sessions = deferred_sessions or {}
+    blocked_drafts = blocked_drafts or []
     strong = [v for v in verdicts if v.verdict == "strong_candidate"]
     borderline = [v for v in verdicts if v.verdict == "borderline"]
     skipped = [v for v in verdicts if v.verdict == "skip"]
@@ -81,6 +88,8 @@ def _build_report_markdown(
     lines.append(f"> Skipped: {len(skipped)}\n")
     if deferred_sessions:
         lines.append(f"> Deferred: {len(deferred_sessions)}\n")
+    if blocked_drafts:
+        lines.append(f"> Blocked by gate: {len(blocked_drafts)}\n")
 
     # Strong candidates
     if strong:
@@ -107,6 +116,15 @@ def _build_report_markdown(
         for session_id, reason in deferred_sessions.items():
             short_reason = reason.replace("\n", " ")[:160]
             lines.append(f"- **{session_id}**: {short_reason}\n")
+
+    if blocked_drafts:
+        lines.append("## Blocked by Admission Gate\n")
+        for blocked in blocked_drafts:
+            title = blocked.verdict.suggested_title or "(untitled)"
+            lines.append(f"### {title} ({blocked.session_id})")
+            for issue in blocked.issues:
+                lines.append(f"- {issue.message}")
+            lines.append("")
 
     # Skipped
     if skipped:

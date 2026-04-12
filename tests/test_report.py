@@ -1,7 +1,7 @@
 from datetime import datetime as real_datetime
 
+from vault_curator import report, sonnet_gate
 from vault_curator.evaluator import SessionVerdict
-from vault_curator import report
 
 
 class FixedDatetime(real_datetime):
@@ -64,6 +64,37 @@ def test_generate_report_marks_deferred_sessions(
     assert "> Deferred: 1" in text
     assert "## Deferred (재시도 필요)" in text
     assert "2026-04-07_03:10" in text
+
+
+def test_generate_report_marks_blocked_drafts(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setattr(report, "datetime", FixedDatetime)
+
+    verdicts = [_strong_verdict("2026-04-07_03:09", "정상 제목")]
+    blocked = [
+        sonnet_gate.BlockedSonnetDraft(
+            verdict=_strong_verdict("2026-04-07_03:11", "막힌 제목"),
+            issues=(
+                sonnet_gate.GateIssue(
+                    "empty_title",
+                    "제목이 비어 있습니다.",
+                ),
+            ),
+        )
+    ]
+
+    report_path = report.generate_report(
+        verdicts,
+        tmp_path,
+        blocked_drafts=blocked,
+    )
+
+    text = report_path.read_text(encoding="utf-8")
+    assert "> Blocked by gate: 1" in text
+    assert "## Blocked by Admission Gate" in text
+    assert "막힌 제목 (2026-04-07_03:11)" in text
+    assert "제목이 비어 있습니다." in text
 
 
 def test_write_source_rollup_overwrites_canonical_file(
