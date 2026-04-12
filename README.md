@@ -83,36 +83,50 @@ Important sections:
 - `[local]`: default local endpoint/model fallback
 - `[automation]`: polling interval used by watch mode
 
+## Environment Setup
+
+Bootstrap the project-local `.venv` with `uv`:
+
+```bash
+uv sync
+```
+
+For development tools as well:
+
+```bash
+uv sync --extra dev
+```
+
+`uv run ...` reuses the same `.venv`.
+
+The CLI examples below use `python -m vault_curator.cli` with `PYTHONPATH=src` so they stay reliable even when the repo lives on a cloud-synced macOS path and editable-install metadata is ignored.
+
 ## Commands
 
 Run once:
 
 ```bash
-conda run -n vault-curator env PYTHONPATH=src \
-python -m vault_curator.cli local-run \
+PYTHONPATH=src uv run python -m vault_curator.cli local-run \
   --timeout-seconds 900
 ```
 
 Keep the final parsed JSON for inspection:
 
 ```bash
-conda run -n vault-curator env PYTHONPATH=src \
-python -m vault_curator.cli local-run \
+PYTHONPATH=src uv run python -m vault_curator.cli local-run \
   --keep-result
 ```
 
 Watch mode:
 
 ```bash
-conda run -n vault-curator env PYTHONPATH=src \
-python -m vault_curator.cli watch-local
+PYTHONPATH=src uv run python -m vault_curator.cli watch-local
 ```
 
 Environment check:
 
 ```bash
-conda run -n vault-curator env PYTHONPATH=src \
-python -m vault_curator.cli doctor
+PYTHONPATH=src uv run python -m vault_curator.cli doctor
 ```
 
 ## Automation
@@ -130,8 +144,34 @@ Recommended structure:
 
 - keep the executable working copy on a normal local path
 - keep any cloud-synced copy as a backup mirror, not as the live execution path
+- bootstrap the repo first with `uv sync` so `scripts/daily-curate.sh` can use `.venv/bin/python`
 
 This avoids common `launchd` problems with cloud-synced directories and symlinked env files.
+
+If the automation should use a different environment path, `scripts/daily-curate.sh` supports overrides:
+
+- `VENV_DIR`: points to a virtualenv root and resolves `<VENV_DIR>/bin/python`
+- `VAULT_CURATOR_PYTHON`: points to the exact Python executable and takes precedence over `VENV_DIR`
+
+Examples:
+
+```bash
+VENV_DIR=/ABSOLUTE/PATH/TO/.venv ./scripts/daily-curate.sh
+```
+
+```bash
+VAULT_CURATOR_PYTHON=/ABSOLUTE/PATH/TO/.venv/bin/python ./scripts/daily-curate.sh
+```
+
+For `launchd`, add them under `EnvironmentVariables` in the plist if needed:
+
+```xml
+<key>EnvironmentVariables</key>
+<dict>
+  <key>VENV_DIR</key>
+  <string>/ABSOLUTE/PATH/TO/.venv</string>
+</dict>
+```
 
 ## Path Notes
 
@@ -145,6 +185,7 @@ Safer pattern:
 Why:
 
 - background jobs can fail on cloud-managed paths due to permission or working-directory issues
+- editable virtualenv metadata such as `.pth` files can inherit the macOS `hidden` flag on cloud-synced paths, which breaks generated console scripts
 - local execution is more stable
 - a one-way sync keeps backup benefits without making the scheduler depend on cloud path behavior
 - if local inference occasionally fails due to memory pressure, the scheduler wrapper can retry after a short delay
@@ -180,24 +221,25 @@ Similarly:
 Install dev dependencies:
 
 ```bash
-conda run -n vault-curator python -m pip install -e '.[dev]'
+uv sync --extra dev
 ```
 
 Compile-check:
 
 ```bash
-conda run -n vault-curator python -m compileall src
+uv run python -m compileall src
 ```
 
 Run tests:
 
 ```bash
-conda run -n vault-curator env PYTHONPATH=src pytest -q
+uv run pytest -q
 ```
 
 The project uses:
 
 - Python 3.12+
+- uv-managed `.venv`
 - Typer
 - Rich
 - local OpenAI-compatible inference server

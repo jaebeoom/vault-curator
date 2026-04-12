@@ -5,7 +5,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 BACKUP_SCRIPT="$PROJECT_DIR/scripts/sync-to-icloud.sh"
-CONDA_BIN="${CONDA_BIN:-$HOME/miniforge3/condabin/conda}"
+VENV_DIR="${VENV_DIR:-$PROJECT_DIR/.venv}"
+VAULT_CURATOR_PYTHON="${VAULT_CURATOR_PYTHON:-$VENV_DIR/bin/python}"
 SHARED_AI_ENV="${SHARED_AI_ENV:-}"
 PENDING_FILE="$PROJECT_DIR/.curation-pending"
 LOCK_DIR="$PROJECT_DIR/.curation.lock"
@@ -75,12 +76,20 @@ if [ -f "$PROJECT_DIR/.env" ]; then
   source_env_file "$PROJECT_DIR/.env"
 fi
 
+if [ ! -x "$VAULT_CURATOR_PYTHON" ]; then
+  echo "Missing Python executable: $VAULT_CURATOR_PYTHON"
+  echo "Bootstrap the repo-local environment first:"
+  echo "  cd \"$PROJECT_DIR\" && uv sync"
+  exit 1
+fi
+
 mkdir -p "$PROJECT_DIR/logs"
 
 tmp_log="$(mktemp)"
 
-if VAULT_CURATOR_SKIP_CLI_LOCK=1 "$CONDA_BIN" run -n vault-curator env PYTHONPATH=src \
-  python -m vault_curator.cli local-run \
+if PYTHONPATH="$PROJECT_DIR/src${PYTHONPATH:+:$PYTHONPATH}" \
+  VAULT_CURATOR_SKIP_CLI_LOCK=1 \
+  "$VAULT_CURATOR_PYTHON" -m vault_curator.cli local-run \
   --timeout-seconds 900 >"$tmp_log" 2>&1; then
   cat "$tmp_log"
   rm -f "$tmp_log"
