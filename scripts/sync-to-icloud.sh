@@ -15,6 +15,9 @@ mkdir -p "$ICLOUD_BACKUP_DIR"
 
 rsync -a --delete \
   --exclude '.DS_Store' \
+  --exclude '.git/' \
+  --exclude '.pytest_cache/' \
+  --exclude '__pycache__/' \
   --exclude 'logs/launchd.out.log' \
   --exclude 'logs/launchd.err.log' \
   "$PROJECT_DIR/" \

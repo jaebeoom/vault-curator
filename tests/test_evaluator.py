@@ -1,3 +1,5 @@
+import pytest
+
 from vault_curator import evaluator
 from vault_curator.parser import HaikuSession
 
@@ -128,6 +130,33 @@ def test_build_prompt_compresses_long_ai_turns() -> None:
     assert "...[truncated]" in prompt
 
 
+def test_build_prompt_keeps_multiple_ai_lines_of_context() -> None:
+    session = HaikuSession(
+        date="2026-04-05",
+        time="09:00",
+        model="test-model",
+        raw_text="\n".join(
+            [
+                "## AI 세션 (09:00, test-model)",
+                "**나**: 비교 프레임이 중요함",
+                "**AI**: 첫 문장",
+                "둘째 문장",
+                "셋째 문장",
+                "넷째 문장",
+                "다섯째 문장",
+            ]
+        ),
+        tags=["#haiku"],
+        user_turns=1,
+        ai_turns=1,
+    )
+
+    prompt = evaluator.build_prompt([session], "context")
+
+    assert "첫 문장 | 둘째 문장 | 셋째 문장 | 넷째 문장" in prompt
+    assert "...[truncated]" in prompt
+
+
 def test_split_session_batches_respects_token_budget() -> None:
     polaris_context = "context"
     sessions = [
@@ -180,3 +209,54 @@ def test_split_session_batches_keeps_small_sessions_together() -> None:
 
     assert len(batches) == 1
     assert len(batches[0]) == 3
+
+
+def test_validate_verdict_coverage_accepts_exact_match() -> None:
+    verdicts = [
+        evaluator.SessionVerdict(
+            session_id="2026-04-07_03:09",
+            verdict="skip",
+            reasoning="ok",
+        ),
+        evaluator.SessionVerdict(
+            session_id="2026-04-07_03:10",
+            verdict="borderline",
+            reasoning="ok",
+        ),
+    ]
+
+    evaluator.validate_verdict_coverage(
+        verdicts,
+        ["2026-04-07_03:09", "2026-04-07_03:10"],
+    )
+
+
+def test_validate_verdict_coverage_rejects_missing_extra_and_duplicates() -> None:
+    verdicts = [
+        evaluator.SessionVerdict(
+            session_id="2026-04-07_03:09",
+            verdict="skip",
+            reasoning="ok",
+        ),
+        evaluator.SessionVerdict(
+            session_id="2026-04-07_03:09",
+            verdict="borderline",
+            reasoning="duplicate",
+        ),
+        evaluator.SessionVerdict(
+            session_id="2026-04-07_03:11",
+            verdict="skip",
+            reasoning="extra",
+        ),
+    ]
+
+    with pytest.raises(evaluator.VerdictCoverageError) as exc_info:
+        evaluator.validate_verdict_coverage(
+            verdicts,
+            ["2026-04-07_03:09", "2026-04-07_03:10"],
+        )
+
+    message = str(exc_info.value)
+    assert "missing=['2026-04-07_03:10']" in message
+    assert "extra=['2026-04-07_03:11']" in message
+    assert "duplicates=['2026-04-07_03:09']" in message

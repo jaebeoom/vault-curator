@@ -25,6 +25,10 @@ class SessionVerdict:
     sonnet_draft: dict[str, str] | None = None
 
 
+class VerdictCoverageError(RuntimeError):
+    """모델 응답이 기대한 세션 집합을 정확히 커버하지 못함."""
+
+
 def _extract_json_text(text: str) -> str:
     """응답에 fenced json 블록이 있으면 내부 JSON만 추출."""
     stripped = text.strip()
@@ -98,19 +102,27 @@ EVALUATION_PROMPT = """\
 - 순수 정보 학습 (개념 설명 요청, 학습 경로 질문)
 - 빈 세션 / 컨텍스트 유실 / 번역 요청
 
+## 오판 방지
+- **false positive 주의**: 유저가 요약을 시킨 뒤 같은 주제 안에서 설명을 조금 더 캐묻는 정도는 strong_candidate가 아닙니다.
+- 후속 질문이 3턴 이상 이어져도, 그 질문이 단지 개념 설명을 더 끌어내는 수준이면 `borderline` 또는 `skip`입니다.
+- **false negative 주의**: 유저 발화가 짧더라도, 명확한 평가/비유/대안 프레임을 새로 던져 대화의 방향을 바꾸면 독립적 판단으로 볼 수 있습니다.
+- strong_candidate는 보수적으로 고르되, 유저의 독자 프레임이 텍스트에서 명시적으로 복원될 때만 승격하세요.
+
 ## 판정 기준
 - **strong_candidate**: 3가지 기준 모두 충족. Sonnet 초안을 생성할 것.
 - **borderline**: 1~2가지만 충족. 리포트에 언급하되 승격하지 않음.
 - **skip**: 즉시 탈락 패턴 또는 기준 미충족.
 
 ## 출력 형식
+`session_id`는 입력에 제공된 값을 그대로 복사하세요. 중복 시각 세션은 `YYYY-MM-DD_HH:MM__abcd1234` 같은 suffix가 붙을 수 있습니다.
+
 반드시 아래 JSON 형식으로만 응답하세요. JSON 외의 텍스트를 포함하지 마세요.
 
 ```json
 {{
   "sessions": [
     {{
-      "session_id": "YYYY-MM-DD_HH:MM",
+      "session_id": "입력에 제공된 session_id 그대로",
       "verdict": "strong_candidate | borderline | skip",
       "reasoning": "판정 이유 (2~3문장, 한국어)",
       "core_idea": "핵심 아이디어 한 줄 (strong_candidate만)",
@@ -160,6 +172,43 @@ SONNET_DRAFT_PROMPT = """\
 ## 출력 형식
 반드시 아래 JSON 형식으로만 응답하세요.
 
+```json
+{{
+  "title": "제안 Sonnet 제목",
+  "summary": "한 줄 요약",
+  "thought": "정제된 생각 본문 4문장",
+  "connections": "연결되는 개념 1~3개",
+  "source": "출처/계기 한 문장"
+}}
+```
+"""
+
+
+COMPACT_SONNET_DRAFT_PROMPT = """\
+당신은 Obsidian Vault용 Sonnet 초안을 짧고 정확하게 쓰는 작성 보조입니다.
+
+## 작업 목표
+- 아래 strong_candidate 세션에 대해 Sonnet 초안을 JSON으로 작성하세요.
+- 대화 요약이 아니라 유저의 주장과 프레임을 전면에 두세요.
+- JSON 외의 텍스트는 절대 출력하지 마세요.
+
+## 최소 규칙
+- `thought`는 정확히 4문장
+- 자기 지칭은 가능하면 "필자"
+- 새로운 사실을 추가하지 말 것
+- `session_id`는 참고용이며 그대로 유지
+
+## 판정 메모
+- session_id: {session_id}
+- suggested_title: {suggested_title}
+- core_idea: {core_idea}
+- connected_themes: {connected_themes}
+- reasoning: {reasoning}
+
+## 유저 발화 중심 세션 요약
+{session_excerpt}
+
+## 출력 형식
 ```json
 {{
   "title": "제안 Sonnet 제목",
@@ -237,42 +286,83 @@ def _compress_session_text(text: str) -> str:
     """긴 세션은 유저 발화를 우선 보존하고 AI 응답은 압축한다."""
     lines = text.splitlines()
     compressed: list[str] = []
+    index = 0
 
-    for line in lines:
+    while index < len(lines):
+        line = lines[index]
         stripped = line.strip()
         if stripped.startswith("## AI 세션"):
             compressed.append(line)
+            index += 1
             continue
         if stripped.startswith("**나**"):
-            compressed.append(line)
+            user_block = [line]
+            index += 1
+            while index < len(lines):
+                next_stripped = lines[index].strip()
+                if (
+                    next_stripped.startswith("## AI 세션")
+                    or next_stripped.startswith("**나**")
+                    or next_stripped.startswith("**AI**:")
+                ):
+                    break
+                user_block.append(lines[index])
+                index += 1
+            compressed.extend(user_block)
             continue
         if stripped.startswith("**AI**:"):
-            body = stripped[len("**AI**:") :].strip()
-            if body:
-                compressed.append(
-                    f"**AI**: {body[:40].rstrip()} ...[truncated]"
-                )
-            else:
-                compressed.append("**AI**: ...[truncated]")
+            ai_block = [line]
+            index += 1
+            while index < len(lines):
+                next_stripped = lines[index].strip()
+                if (
+                    next_stripped.startswith("## AI 세션")
+                    or next_stripped.startswith("**나**")
+                    or next_stripped.startswith("**AI**:")
+                ):
+                    break
+                ai_block.append(lines[index])
+                index += 1
+            compressed.append(_compress_ai_block(ai_block))
             continue
         if stripped.startswith("#"):
             compressed.append(line)
-            continue
-        if compressed and compressed[-1].startswith("**나**"):
-            compressed.append(line)
-            continue
+        index += 1
 
     merged = "\n".join(compressed)
-    if len(merged) <= 3000:
+    if len(merged) <= 4500:
         return merged
 
-    head = merged[:2200].rstrip()
-    tail = merged[-600:].lstrip()
+    head = merged[:3200].rstrip()
+    tail = merged[-900:].lstrip()
     return (
         f"{head}\n\n"
         "[...session truncated for length; preserved user turns and tail context...]\n\n"
         f"{tail}"
     )
+
+
+def _compress_ai_block(lines: list[str]) -> str:
+    snippets: list[str] = []
+
+    first_line = lines[0].strip()
+    first_body = first_line[len("**AI**:") :].strip()
+    if first_body:
+        snippets.append(first_body)
+
+    for line in lines[1:]:
+        stripped = line.strip()
+        if stripped:
+            snippets.append(stripped)
+
+    if not snippets:
+        return "**AI**: ...[truncated]"
+
+    preview = " | ".join(snippets[:4])
+    if len(snippets) > 4 or len(preview) > 320:
+        preview = f"{preview[:320].rstrip()} ...[truncated]"
+
+    return f"**AI**: {preview}"
 
 
 def _estimate_token_count(text: str) -> int:
@@ -348,6 +438,41 @@ def parse_verdicts(text: str) -> list[SessionVerdict]:
     return verdicts
 
 
+def validate_verdict_coverage(
+    verdicts: list[SessionVerdict],
+    expected_session_ids: list[str],
+) -> None:
+    """모델 응답이 기대한 세션 집합을 정확히 커버하는지 검증."""
+    expected = list(expected_session_ids)
+    actual = [verdict.session_id for verdict in verdicts]
+
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    for session_id in actual:
+        if session_id in seen and session_id not in duplicates:
+            duplicates.append(session_id)
+        seen.add(session_id)
+
+    expected_set = set(expected)
+    actual_set = set(actual)
+    missing = sorted(expected_set - actual_set)
+    extra = sorted(actual_set - expected_set)
+
+    if not (duplicates or missing or extra):
+        return
+
+    parts: list[str] = []
+    if missing:
+        parts.append(f"missing={missing}")
+    if extra:
+        parts.append(f"extra={extra}")
+    if duplicates:
+        parts.append(f"duplicates={duplicates}")
+    raise VerdictCoverageError(
+        "Model verdict coverage mismatch: " + ", ".join(parts)
+    )
+
+
 def build_polish_prompt(
     draft: dict[str, str],
     polaris_context: str,
@@ -385,6 +510,55 @@ def build_sonnet_draft_prompt(
         connected_themes=" ".join(verdict.connected_themes),
         reasoning=verdict.reasoning,
         session_text=_compress_session_text(session.raw_text),
+    )
+
+
+def _extract_user_focus_text(text: str) -> str:
+    lines = text.splitlines()
+    user_blocks: list[str] = []
+    current_block: list[str] = []
+    collecting = False
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("**나**"):
+            if current_block:
+                user_blocks.append("\n".join(current_block))
+            current_block = [line]
+            collecting = True
+            continue
+        if collecting and (
+            stripped.startswith("## AI 세션")
+            or stripped.startswith("**AI**:")
+        ):
+            if current_block:
+                user_blocks.append("\n".join(current_block))
+            current_block = []
+            collecting = False
+            continue
+        if collecting:
+            current_block.append(line)
+
+    if current_block:
+        user_blocks.append("\n".join(current_block))
+
+    if user_blocks:
+        return "\n\n".join(block.strip() for block in user_blocks[:3])
+    return _compress_session_text(text)[:1200]
+
+
+def build_compact_sonnet_draft_prompt(
+    verdict: SessionVerdict,
+    session: HaikuSession,
+) -> str:
+    """draft 생성 실패 시 짧은 fallback 프롬프트."""
+    return COMPACT_SONNET_DRAFT_PROMPT.format(
+        session_id=verdict.session_id,
+        suggested_title=verdict.suggested_title,
+        core_idea=verdict.core_idea,
+        connected_themes=" ".join(verdict.connected_themes),
+        reasoning=verdict.reasoning,
+        session_excerpt=_extract_user_focus_text(session.raw_text),
     )
 
 

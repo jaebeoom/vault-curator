@@ -25,6 +25,43 @@ class LocalModelConfig:
         return f"{self.base_url.rstrip('/')}/chat/completions"
 
 
+def _extract_message_text(content: object) -> str | None:
+    if isinstance(content, str):
+        return content
+
+    if isinstance(content, dict):
+        text = content.get("text")
+        if isinstance(text, str) and text.strip():
+            return text
+        nested_content = content.get("content")
+        if isinstance(nested_content, str) and nested_content.strip():
+            return nested_content
+        return None
+
+    if isinstance(content, list):
+        text_parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                text_parts.append(item)
+                continue
+            if not isinstance(item, dict):
+                continue
+
+            text = item.get("text")
+            if isinstance(text, str) and text:
+                text_parts.append(text)
+                continue
+
+            nested_content = item.get("content")
+            if isinstance(nested_content, str) and nested_content:
+                text_parts.append(nested_content)
+
+        merged = "".join(text_parts).strip()
+        return merged or None
+
+    return None
+
+
 def generate_json(prompt: str, cfg: LocalModelConfig) -> str:
     """OpenAI-호환 chat completions 엔드포인트에 프롬프트를 보낸다."""
     payload = {
@@ -82,17 +119,19 @@ def generate_json(prompt: str, cfg: LocalModelConfig) -> str:
 
     message = choices[0].get("message") or {}
     content = message.get("content", "")
+    extracted = _extract_message_text(content)
+    if extracted is not None:
+        return extracted
 
-    if isinstance(content, str):
-        return content
-
-    if isinstance(content, list):
-        text_parts: list[str] = []
-        for item in content:
-            if isinstance(item, dict) and item.get("type") == "text":
-                text_parts.append(item.get("text", ""))
-        merged = "".join(text_parts).strip()
-        if merged:
-            return merged
-
-    raise LocalModelError("Local model response content format was unsupported.")
+    message_keys = sorted(message.keys())
+    finish_reason = choices[0].get("finish_reason")
+    if finish_reason == "length" and message.get("reasoning_content"):
+        raise LocalModelError(
+            "Local model exhausted output tokens before producing content. "
+            "Increase max_output_tokens for this stage."
+        )
+    raise LocalModelError(
+        "Local model response content format was unsupported: "
+        f"type={type(content).__name__}, message_keys={message_keys}, "
+        f"finish_reason={finish_reason}"
+    )

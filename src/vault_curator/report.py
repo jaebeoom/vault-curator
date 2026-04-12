@@ -8,28 +8,79 @@ from pathlib import Path
 
 from vault_curator.evaluator import SessionVerdict
 
+_SESSION_MARKER_TEMPLATE = "<!-- vault-curator:session_id={session_id} -->"
+_LEGACY_SOURCE_TEMPLATE = re.compile(
+    r"^## 출처/계기\s+.*?\b{session_id}\b",
+    re.MULTILINE | re.DOTALL,
+)
+
 
 def generate_report(
     verdicts: list[SessionVerdict],
     reports_dir: Path,
+    expected_session_count: int | None = None,
+    deferred_sessions: dict[str, str] | None = None,
 ) -> Path:
     """마크다운 리포트를 생성하고 파일 경로를 반환."""
     reports_dir.mkdir(parents=True, exist_ok=True)
 
     now = datetime.now()
-    filename = f"{now.strftime('%Y-%m-%d_%H%M')}.md"
-    report_path = reports_dir / filename
+    stem = now.strftime("%Y-%m-%d_%H%M%S")
+    report_path = _resolve_unique_report_path(reports_dir, stem)
+    content = _build_report_markdown(
+        verdicts,
+        now,
+        expected_session_count=expected_session_count,
+        deferred_sessions=deferred_sessions,
+    )
+    report_path.write_text(content, encoding="utf-8")
+    return report_path
 
+
+def write_source_rollup(
+    verdicts: list[SessionVerdict],
+    reports_dir: Path,
+    source_date: str,
+    expected_session_count: int | None = None,
+    deferred_sessions: dict[str, str] | None = None,
+) -> Path:
+    """소스 날짜별 최신 상태를 덮어쓰는 canonical rollup을 작성."""
+    rollup_dir = reports_dir / "by-date"
+    rollup_dir.mkdir(parents=True, exist_ok=True)
+    report_path = rollup_dir / f"{source_date}.md"
+    content = _build_report_markdown(
+        verdicts,
+        datetime.now(),
+        expected_session_count=expected_session_count,
+        deferred_sessions=deferred_sessions,
+    )
+    report_path.write_text(content, encoding="utf-8")
+    return report_path
+
+
+def _build_report_markdown(
+    verdicts: list[SessionVerdict],
+    now: datetime,
+    expected_session_count: int | None = None,
+    deferred_sessions: dict[str, str] | None = None,
+) -> str:
+    deferred_sessions = deferred_sessions or {}
     strong = [v for v in verdicts if v.verdict == "strong_candidate"]
     borderline = [v for v in verdicts if v.verdict == "borderline"]
     skipped = [v for v in verdicts if v.verdict == "skip"]
-
     lines: list[str] = []
     lines.append(f"# Haiku Review: {now.strftime('%Y-%m-%d %H:%M')}\n")
-    lines.append(f"> Sessions evaluated: {len(verdicts)}")
+    total_sessions = (
+        expected_session_count
+        if expected_session_count is not None
+        else len(verdicts) + len(deferred_sessions)
+    )
+    lines.append(f"> Sessions evaluated: {total_sessions}")
     lines.append(f"> Strong candidates: {len(strong)}")
     lines.append(f"> Borderline: {len(borderline)}")
     lines.append(f"> Skipped: {len(skipped)}\n")
+    if deferred_sessions:
+        lines.append(f"> Deferred: {len(deferred_sessions)}\n")
 
     # Strong candidates
     if strong:
@@ -51,6 +102,12 @@ def generate_report(
         for v in borderline:
             lines.append(f"- **{v.session_id}**: {v.reasoning}\n")
 
+    if deferred_sessions:
+        lines.append("## Deferred (재시도 필요)\n")
+        for session_id, reason in deferred_sessions.items():
+            short_reason = reason.replace("\n", " ")[:160]
+            lines.append(f"- **{session_id}**: {short_reason}\n")
+
     # Skipped
     if skipped:
         lines.append("## Skipped\n")
@@ -61,8 +118,61 @@ def generate_report(
             lines.append(f"| {v.session_id} | {short_reason} |")
         lines.append("")
 
-    report_path.write_text("\n".join(lines), encoding="utf-8")
-    return report_path
+    return "\n".join(lines)
+
+
+def _resolve_unique_report_path(reports_dir: Path, stem: str) -> Path:
+    report_path = reports_dir / f"{stem}.md"
+    if not report_path.exists():
+        return report_path
+
+    suffix = 1
+    while True:
+        report_path = reports_dir / f"{stem}-{suffix:02d}.md"
+        if not report_path.exists():
+            return report_path
+        suffix += 1
+
+
+def _session_marker(session_id: str) -> str:
+    return _SESSION_MARKER_TEMPLATE.format(session_id=session_id)
+
+
+def _find_existing_note_path(
+    sonnet_dir: Path,
+    session_id: str,
+) -> Path | None:
+    marker = _session_marker(session_id)
+    safe_session_id = _slugify_session_id(session_id)
+    legacy_matches: list[Path] = []
+
+    for path in sorted(sonnet_dir.glob("*.md")):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+
+        if marker in text:
+            return path
+
+        if path.name.startswith(f"{safe_session_id}__") or path.stem == safe_session_id:
+            return path
+
+        if "#sonnet" not in text or "#from/ai-session" not in text:
+            continue
+
+        legacy_source_pattern = re.compile(
+            _LEGACY_SOURCE_TEMPLATE.pattern.format(session_id=re.escape(session_id)),
+            _LEGACY_SOURCE_TEMPLATE.flags,
+        )
+        if legacy_source_pattern.search(text):
+            legacy_matches.append(path)
+
+    return legacy_matches[0] if len(legacy_matches) == 1 else None
+
+
+def _slugify_session_id(session_id: str) -> str:
+    return session_id.replace(":", "-")
 
 
 def write_sonnet_notes(
@@ -83,19 +193,22 @@ def write_sonnet_notes(
         draft = v.sonnet_draft
         assert draft is not None
 
-        # 파일명은 공백을 언더스코어로 고정해 Vault 내 일관성을 맞춘다.
         safe_title = v.suggested_title.strip()
-        if not safe_title:
-            safe_title = v.session_id
-        safe_title = re.sub(r"\s+", "_", safe_title)
-        filename = f"{safe_title}.md"
-        filepath = sonnet_dir / filename
-
-        # 중복 방지
-        if filepath.exists():
-            filepath = sonnet_dir / f"{safe_title} ({v.session_id}).md"
+        safe_title = re.sub(r"\s+", "_", safe_title) if safe_title else ""
+        existing_path = _find_existing_note_path(sonnet_dir, v.session_id)
+        if existing_path is not None:
+            filepath = existing_path
+        else:
+            safe_session_id = _slugify_session_id(v.session_id)
+            filename = (
+                f"{safe_session_id}__{safe_title}.md"
+                if safe_title
+                else f"{safe_session_id}.md"
+            )
+            filepath = sonnet_dir / filename
 
         content = (
+            f"{_session_marker(v.session_id)}\n"
             f"# {v.suggested_title}\n\n"
             f"> 한 줄 요약: {draft.get('summary', '')}\n\n"
             f"## 생각\n\n"

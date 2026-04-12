@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections import Counter
+import hashlib
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -17,16 +19,25 @@ class HaikuSession:
     user_turns: int = 0
     ai_turns: int = 0
     file_path: Path | None = None
+    duplicate_count: int = 1
+    duplicate_suffix: str = ""
 
     @property
     def session_id(self) -> str:
-        return f"{self.date}_{self.time}"
+        base = f"{self.date}_{self.time}"
+        if self.duplicate_suffix:
+            return f"{base}__{self.duplicate_suffix}"
+        return base
 
 
 _HEADER_RE = re.compile(
     r"^## AI 세션 \((\d{2}:\d{2}),\s*(.+?)\)\s*$", re.MULTILINE
 )
 _TAG_RE = re.compile(r"#[\w/\-]+")
+
+
+def _stable_duplicate_suffix(session: HaikuSession) -> str:
+    return hashlib.sha1(session.raw_text.encode("utf-8")).hexdigest()[:8]
 
 
 def parse_file(path: Path) -> list[HaikuSession]:
@@ -75,6 +86,26 @@ def parse_file(path: Path) -> list[HaikuSession]:
                 file_path=path,
             )
         )
+
+    time_groups: dict[str, list[HaikuSession]] = {}
+    for session in sessions:
+        time_groups.setdefault(session.time, []).append(session)
+
+    for group in time_groups.values():
+        if len(group) <= 1:
+            continue
+
+        suffix_counts = Counter(_stable_duplicate_suffix(session) for session in group)
+        suffix_seen: Counter[str] = Counter()
+
+        for session in group:
+            suffix = _stable_duplicate_suffix(session)
+            session.duplicate_count = len(group)
+            if suffix_counts[suffix] > 1:
+                suffix_seen[suffix] += 1
+                session.duplicate_suffix = f"{suffix}-{suffix_seen[suffix]}"
+            else:
+                session.duplicate_suffix = suffix
 
     return sessions
 

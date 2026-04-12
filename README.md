@@ -16,10 +16,11 @@ The project is designed around a simple idea:
 - context-aware curation using Polaris context files
 - promotion decisions: `strong_candidate`, `borderline`, `skip`
 - adaptive batch splitting for long local-model runs
-- file-by-file incremental processing of only new or changed Haiku files
+- session-level incremental processing backed by persisted state
 - two-stage Sonnet generation: verdict first, draft generation only for `strong_candidate`
 - optional Sonnet polish step tuned to the user's writing voice
-- report generation
+- deferred reporting when a strong candidate cannot yet be drafted safely
+- timestamped reports plus canonical by-date rollups
 
 ## Workflow
 
@@ -36,11 +37,25 @@ The default flow is:
 9. Write a review report
 10. Write Sonnet notes into `Vault/Sonnet`
 
+## Architecture
+
+The CLI is intentionally thin and delegates to focused modules:
+
+- `runtime.py`: config loading and path resolution
+- `locking.py`: CLI-level lock handling
+- `preparation.py`: pending-session selection and prompt/meta generation
+- `evaluation_runner.py`: local-model verdict execution and batch splitting
+- `drafting.py`: Sonnet draft generation, compact fallback, and polish
+- `finalization.py`: reports, Sonnet note writes, and state updates
+- `pipeline.py`: file-level orchestration
+
 ## Local Model Configuration
 
 This project expects an OpenAI-compatible local endpoint.
 
-Shared model settings can be centralized in a file outside the repo, for example:
+`config.toml` is sufficient for local runs and `launchd`.
+
+Optional shared model settings can still be centralized in a file outside the repo, for example:
 
 ```bash
 OMLX_BASE_URL=http://127.0.0.1:8001/v1
@@ -48,12 +63,12 @@ OMLX_MODEL=your-model-name
 OMLX_API_KEY=your-api-key
 ```
 
-The CLI prefers shared `OMLX_*` environment variables when present.
+The CLI prefers `OMLX_*` environment variables when present, but they are overrides rather than requirements.
 
 Project-specific overrides can still live in `.env`, but the recommended setup is:
 
-- shared model settings in a shared env file
-- project-specific settings in the project `.env`
+- keep the runtime defaults in `config.toml`
+- use `.env` or an explicit shared env file only for overrides
 
 ## Configuration
 
@@ -116,7 +131,7 @@ Recommended structure:
 - keep the executable working copy on a normal local path
 - keep any cloud-synced copy as a backup mirror, not as the live execution path
 
-This avoids common `launchd` problems with cloud-synced directories.
+This avoids common `launchd` problems with cloud-synced directories and symlinked env files.
 
 ## Path Notes
 
