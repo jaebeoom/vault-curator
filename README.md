@@ -13,7 +13,7 @@ The project is designed around a simple idea:
 `vault-curator` currently provides:
 
 - Haiku parsing from daily markdown files
-- context-aware curation using Polaris context files
+- context-aware curation using the Polaris `README.md` entry contract
 - promotion decisions: `strong_candidate`, `borderline`, `skip`
 - adaptive batch splitting for long local-model runs
 - session-level incremental processing backed by persisted state
@@ -33,7 +33,7 @@ The default flow is:
 1. Read new or changed files from `Vault/Haiku`
 2. Process one changed Haiku file at a time
 3. Parse sessions
-4. Build curation prompts with Polaris context
+4. Build curation prompts from `Vault/Polaris/AI/README.md` first, then the relevant Polaris context files
 5. Split large session sets into smaller batches for the local model
 6. Send verdict-only evaluation prompts to a local OpenAI-compatible endpoint
 7. For `strong_candidate` sessions, generate Sonnet drafts in separate follow-up calls
@@ -56,6 +56,16 @@ The CLI is intentionally thin and delegates to focused modules:
 - `finalization.py`: reports, Sonnet note writes, and state updates
 - `sonnet_catalog.py`: top-level Sonnet parsing, connection normalization, and index generation
 - `pipeline.py`: file-level orchestration
+
+## Polaris Context Contract
+
+`vault-curator` treats `Vault/Polaris/AI/README.md` as the canonical Polaris entry point.
+
+- base prompt context: `README.md`, `tag-taxonomy.md`, `writing-voice.md`
+- current default personal context: `about-me.md`, `top-of-mind.md`
+- not auto-injected: `Vault/Polaris/Human/current-operating-plan.md`
+
+This keeps the README-first contract explicit without turning Human planning documents into always-on prompt payload.
 
 ## Local Model Configuration
 

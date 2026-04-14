@@ -412,9 +412,11 @@ def doctor() -> None:
         ("Sonnet dir", sonnet_dir.exists()),
         ("Polaris dir", polaris_dir.exists()),
         ("config.toml", (_PROJECT_DIR / "config.toml").exists()),
+        ("README.md", (polaris_dir / "README.md").exists()),
         ("about-me.md", (polaris_dir / "about-me.md").exists()),
         ("top-of-mind.md", (polaris_dir / "top-of-mind.md").exists()),
         ("tag-taxonomy.md", (polaris_dir / "tag-taxonomy.md").exists()),
+        ("writing-voice.md", (polaris_dir / "writing-voice.md").exists()),
     ]
 
     haiku_count = (

@@ -6,12 +6,16 @@ from pathlib import Path
 import re
 
 
-_CONTEXT_FILES = [
-    "about-me.md",
-    "top-of-mind.md",
+_BASE_CONTEXT_FILES = (
+    "README.md",
     "tag-taxonomy.md",
     "writing-voice.md",
-]
+)
+
+_OPTIONAL_CONTEXT_FILES = (
+    "about-me.md",
+    "top-of-mind.md",
+)
 
 _TAG_GROUP_HEADINGS = {
     "구조 태그": "structural",
@@ -22,11 +26,24 @@ _TAG_GROUP_HEADINGS = {
 _TAG_RE = re.compile(r"`(#[^`]+)`")
 
 
-def load_polaris(polaris_dir: Path) -> str:
-    """Polaris/AI 디렉토리에서 컨텍스트 문서들을 로드해 하나의 문자열로 반환."""
+def iter_context_files(
+    *, include_optional_context: bool = True
+) -> tuple[str, ...]:
+    """README-first Polaris 컨텍스트 순서를 반환한다."""
+    if include_optional_context:
+        return _BASE_CONTEXT_FILES + _OPTIONAL_CONTEXT_FILES
+    return _BASE_CONTEXT_FILES
+
+
+def load_polaris(
+    polaris_dir: Path, *, include_optional_context: bool = True
+) -> str:
+    """Polaris/AI 디렉토리에서 README-first 컨텍스트를 로드한다."""
     sections: list[str] = []
 
-    for filename in _CONTEXT_FILES:
+    for filename in iter_context_files(
+        include_optional_context=include_optional_context
+    ):
         filepath = polaris_dir / filename
         if filepath.exists():
             content = filepath.read_text(encoding="utf-8").strip()
