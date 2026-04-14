@@ -21,6 +21,7 @@ The project is designed around a simple idea:
 - optional Sonnet polish step tuned to the user's writing voice
 - deterministic normalization for Sonnet `connections` and subject tags before Vault write
 - Sonnet admission gate that blocks structurally invalid drafts before Vault write
+- Haiku의 `<!-- source: ... -->` 주석과 Nathan의 짧은 판단/비유를 Sonnet framing과 `source` 필드에 우선 반영하도록 프롬프트 보강
 - soft duplicate warnings for titles that look similar to existing Sonnet notes
 - deferred reporting when a strong candidate cannot yet be drafted safely
 - top-level `Vault/Sonnet/index.md` rebuilds from existing Sonnet notes

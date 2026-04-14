@@ -157,6 +157,71 @@ def test_build_prompt_keeps_multiple_ai_lines_of_context() -> None:
     assert "...[truncated]" in prompt
 
 
+def test_build_sonnet_draft_prompt_mentions_nathan_framing_and_source_comment() -> None:
+    session = HaikuSession(
+        date="2026-04-05",
+        time="09:00",
+        model="test-model",
+        raw_text="\n".join(
+            [
+                "## AI 세션 (09:00, test-model)",
+                "**나**: 후한 말 난세구만 ㅋㅋ",
+                "<!-- source: https://x.com/test/status/123 -->",
+                "**AI**: 설명",
+            ]
+        ),
+        tags=["#haiku"],
+        user_turns=1,
+        ai_turns=1,
+    )
+    verdict = evaluator.SessionVerdict(
+        session_id=session.session_id,
+        verdict="strong_candidate",
+        reasoning="판정 이유",
+        core_idea="핵심 아이디어",
+        suggested_title="제목",
+        connected_themes=["#topic/test"],
+    )
+
+    prompt = evaluator.build_sonnet_draft_prompt(verdict, session, "context")
+
+    assert "Nathan의 짧은 평가/비유/결론" in prompt
+    assert "`<!-- source: ... -->`가 있으면" in prompt
+    assert "<!-- source: https://x.com/test/status/123 -->" in prompt
+
+
+def test_build_compact_sonnet_draft_prompt_keeps_source_comment_in_excerpt() -> None:
+    session = HaikuSession(
+        date="2026-04-05",
+        time="09:00",
+        model="test-model",
+        raw_text="\n".join(
+            [
+                "## AI 세션 (09:00, test-model)",
+                "**나**: 비교 프레임이 중요함",
+                "<!-- source: https://www.youtube.com/watch?v=abcdefghijk -->",
+                "**AI**: 설명",
+            ]
+        ),
+        tags=["#haiku"],
+        user_turns=1,
+        ai_turns=1,
+    )
+    verdict = evaluator.SessionVerdict(
+        session_id=session.session_id,
+        verdict="strong_candidate",
+        reasoning="판정 이유",
+        core_idea="핵심 아이디어",
+        suggested_title="제목",
+        connected_themes=["#topic/test"],
+    )
+
+    prompt = evaluator.build_compact_sonnet_draft_prompt(verdict, session)
+
+    assert "<!-- source: https://www.youtube.com/watch?v=abcdefghijk -->" in prompt
+    assert "Nathan 판단의 보조 근거" in prompt
+
+
 def test_split_session_batches_respects_token_budget() -> None:
     polaris_context = "context"
     sessions = [
