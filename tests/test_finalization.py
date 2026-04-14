@@ -17,6 +17,34 @@ def _cfg(vault_root: Path) -> dict:
     }
 
 
+def _write_taxonomy(vault_root: Path) -> None:
+    polaris_dir = vault_root / "Polaris" / "AI"
+    polaris_dir.mkdir(parents=True)
+    (polaris_dir / "tag-taxonomy.md").write_text(
+        "\n".join(
+            [
+                "# Tag Taxonomy",
+                "",
+                "## 구조 태그",
+                "- `#sonnet`",
+                "- `#haiku`",
+                "- `#daily`",
+                "",
+                "## 상태 태그",
+                "- `#draft`",
+                "",
+                "## 주제 태그",
+                "- `#tech/ai`",
+                "- `#investment`",
+                "",
+                "## 메타 태그",
+                "- `#from/ai-session`",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
 def _strong_verdict(
     session_id: str,
     title: str,
@@ -48,6 +76,7 @@ def test_finalize_result_blocks_invalid_sonnet_and_skips_state_update(
     vault_root = tmp_path / "Vault"
     (vault_root / "Haiku").mkdir(parents=True)
     (vault_root / "Sonnet").mkdir(parents=True)
+    _write_taxonomy(vault_root)
     project_dir.mkdir()
 
     result_file = project_dir / ".curator-result.json"
@@ -82,8 +111,12 @@ def test_finalize_result_blocks_invalid_sonnet_and_skips_state_update(
 
     sonnet_files = sorted((vault_root / "Sonnet").glob("*.md"))
     assert [path.name for path in sonnet_files] == [
-        "2026-04-12_09-30__정상_제목.md"
+        "2026-04-12_09-30__정상_제목.md",
+        "index.md",
     ]
+    index_text = (vault_root / "Sonnet" / "index.md").read_text(encoding="utf-8")
+    assert "# Sonnet Index" in index_text
+    assert "정상 제목" in index_text
 
     reports_dir = project_dir / "reports"
     report_files = sorted(reports_dir.glob("*.md"))
@@ -105,6 +138,7 @@ def test_finalize_result_reports_blocked_count_in_console(tmp_path) -> None:
     vault_root = tmp_path / "Vault"
     (vault_root / "Haiku").mkdir(parents=True)
     (vault_root / "Sonnet").mkdir(parents=True)
+    _write_taxonomy(vault_root)
     project_dir.mkdir()
 
     result_file = project_dir / ".curator-result.json"

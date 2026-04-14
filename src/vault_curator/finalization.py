@@ -7,7 +7,15 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
-from vault_curator import evaluator, report, runtime, sonnet_gate, state
+from vault_curator import (
+    context,
+    evaluator,
+    report,
+    runtime,
+    sonnet_catalog,
+    sonnet_gate,
+    state,
+)
 
 
 def finalize_result(
@@ -24,7 +32,7 @@ def finalize_result(
     deferred_sessions: dict[str, str] | None = None,
     source_dates: list[str] | None = None,
 ) -> None:
-    _, sonnet_dir, _, reports_dir, _ = runtime.resolve_paths(
+    _, sonnet_dir, polaris_dir, reports_dir, _ = runtime.resolve_paths(
         cfg, project_dir=project_dir
     )
 
@@ -34,6 +42,12 @@ def finalize_result(
 
     raw = rfile.read_text(encoding="utf-8")
     verdicts = evaluator.parse_verdicts(raw)
+    allowed_subject_tags = context.load_subject_tags(polaris_dir)
+    verdicts = sonnet_catalog.normalize_verdicts(
+        verdicts,
+        sonnet_dir,
+        allowed_subject_tags,
+    )
     expected_entries = (
         expected_session_entries
         if expected_session_entries is not None
@@ -53,6 +67,10 @@ def finalize_result(
         verdicts,
         sonnet_dir,
     )
+    potential_duplicates = sonnet_gate.find_potential_duplicates(
+        admitted_verdicts,
+        sonnet_dir,
+    )
     blocked_session_ids = {blocked.session_id for blocked in blocked_drafts}
     admitted_entries = (
         {
@@ -70,6 +88,7 @@ def finalize_result(
         expected_session_count=expected_session_count,
         deferred_sessions=deferred_sessions,
         blocked_drafts=blocked_drafts,
+        potential_duplicates=potential_duplicates,
     )
     console.print(f"[bold green]리포트:[/bold green] {report_path}")
     if source_dates and len(source_dates) == 1:
@@ -80,6 +99,7 @@ def finalize_result(
             expected_session_count=expected_session_count,
             deferred_sessions=deferred_sessions,
             blocked_drafts=blocked_drafts,
+            potential_duplicates=potential_duplicates,
         )
         console.print(f"[dim]Rollup:[/dim] {rollup_path}")
 
@@ -92,12 +112,14 @@ def finalize_result(
             console.print(f"  → {blocked.session_id}: {reason_text}")
 
     written = report.write_sonnet_notes(admitted_verdicts, sonnet_dir)
+    index_path = sonnet_catalog.write_index(sonnet_dir)
     if written:
         console.print(
             f"[bold green]Sonnet 노트 {len(written)}개 생성:[/bold green]"
         )
         for path in written:
             console.print(f"  → {path.name}")
+    console.print(f"[dim]Sonnet index:[/dim] {index_path}")
 
     if meta_file.exists():
         haiku_dir, _, _, _, _ = runtime.resolve_paths(

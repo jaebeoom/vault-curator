@@ -127,7 +127,7 @@ EVALUATION_PROMPT = """\
       "reasoning": "판정 이유 (2~3문장, 한국어)",
       "core_idea": "핵심 아이디어 한 줄 (strong_candidate만)",
       "suggested_title": "제안 Sonnet 제목 (strong_candidate만)",
-      "connected_themes": ["#tag1", "#tag2"]
+      "connected_themes": ["#topic/tag1", "#topic/tag2"]
     }}
   ]
 }}
@@ -156,7 +156,10 @@ SONNET_DRAFT_PROMPT = """\
   - 2문장: 그 한계 또는 이번 사례의 이탈 지점 지적
   - 3문장: 대안 프레임 제시. 가능하면 "다시 말해,"로 시작
   - 4문장: 열린 질문, 경고, 혹은 향후 판단 기준으로 마무리
-- `connections`는 1~3개의 plain text 개념 또는 확실한 기존 노트명만
+- `connections`는 1~3개만 작성
+- Python list(`['a', 'b']`)를 쓰지 말 것
+- 태그(`#tech/ai`)를 쓰지 말 것
+- 정확히 매칭되는 기존 Sonnet 노트 제목일 때만 note reference로 쓰고, 아니면 plain text 개념으로 둘 것
 - 새로운 사실이나 근거를 임의로 추가하지 마세요.
 
 ## 판정 메모
@@ -241,7 +244,7 @@ SONNET_POLISH_PROMPT = """\
   - 3문장: 대안 프레임 제시. 가능하면 "다시 말해,"로 시작
   - 4문장: 열린 질문, 경고, 혹은 향후 판단 기준으로 마무리
 - 가능하면 "필자"를 자연스럽게 사용
-- `connections`: plain text 1~3개만. 임의 위키링크 금지
+- `connections`: 1~3개만. Python list 금지, 태그 금지, 임의 위키링크 금지
 - `source`: 한 문장으로 간결하게 유지
 
 ## 원본 Sonnet 초안

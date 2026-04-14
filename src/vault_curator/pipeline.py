@@ -18,6 +18,7 @@ from vault_curator import (
     parser,
     preparation,
     runtime,
+    sonnet_catalog,
     state,
 )
 
@@ -45,6 +46,10 @@ def run_file_cycle(
     result_file: Path = runtime.RESULT_FILE,
     meta_file: Path = runtime.META_FILE,
 ) -> FileCycleResult:
+    _, sonnet_dir, polaris_dir, _, _ = runtime.resolve_paths(
+        cfg, project_dir=project_dir
+    )
+    allowed_subject_tags = context.load_subject_tags(polaris_dir)
     _, session_batches = preparation.prepare_prompt_for_inputs(
         cfg,
         [(file, sessions)],
@@ -69,6 +74,11 @@ def run_file_cycle(
         console=console,
     )
     verdicts = drafting.exclude_failed_draft_verdicts(verdicts, draft_failures)
+    verdicts = sonnet_catalog.normalize_verdicts(
+        verdicts,
+        sonnet_dir,
+        allowed_subject_tags,
+    )
     final_result_text = evaluator.verdicts_to_json(verdicts)
     result_file.write_text(final_result_text, encoding="utf-8")
 
@@ -81,7 +91,14 @@ def run_file_cycle(
             result_file=result_file,
         )
         if polished_result is not None:
-            final_result_text = polished_result
+            verdicts = evaluator.parse_verdicts(polished_result)
+            verdicts = sonnet_catalog.normalize_verdicts(
+                verdicts,
+                sonnet_dir,
+                allowed_subject_tags,
+            )
+            final_result_text = evaluator.verdicts_to_json(verdicts)
+            result_file.write_text(final_result_text, encoding="utf-8")
 
     finalization.finalize_result(
         cfg,

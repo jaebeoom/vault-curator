@@ -97,6 +97,37 @@ def test_generate_report_marks_blocked_drafts(
     assert "제목이 비어 있습니다." in text
 
 
+def test_generate_report_marks_potential_duplicates(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setattr(report, "datetime", FixedDatetime)
+
+    verdicts = [_strong_verdict("2026-04-07_03:09", "메모리 사이클의 외생 변수")]
+    warnings = [
+        sonnet_gate.PotentialDuplicateWarning(
+            verdict=verdicts[0],
+            matches=(
+                sonnet_gate.DuplicateCandidate(
+                    title="메모리 슈퍼사이클과 외생 변수",
+                    path=tmp_path / "existing.md",
+                    similarity=0.72,
+                ),
+            ),
+        )
+    ]
+
+    report_path = report.generate_report(
+        verdicts,
+        tmp_path,
+        potential_duplicates=warnings,
+    )
+
+    text = report_path.read_text(encoding="utf-8")
+    assert "## Potential Duplicates" in text
+    assert "메모리 슈퍼사이클과 외생 변수" in text
+    assert "similarity 0.72" in text
+
+
 def test_write_source_rollup_overwrites_canonical_file(
     monkeypatch, tmp_path
 ) -> None:

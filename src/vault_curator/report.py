@@ -7,7 +7,8 @@ from datetime import datetime
 from pathlib import Path
 
 from vault_curator.evaluator import SessionVerdict
-from vault_curator.sonnet_gate import BlockedSonnetDraft
+from vault_curator import sonnet_catalog
+from vault_curator.sonnet_gate import BlockedSonnetDraft, PotentialDuplicateWarning
 
 _SESSION_MARKER_TEMPLATE = "<!-- vault-curator:session_id={session_id} -->"
 _LEGACY_SOURCE_TEMPLATE = re.compile(
@@ -22,6 +23,7 @@ def generate_report(
     expected_session_count: int | None = None,
     deferred_sessions: dict[str, str] | None = None,
     blocked_drafts: list[BlockedSonnetDraft] | None = None,
+    potential_duplicates: list[PotentialDuplicateWarning] | None = None,
 ) -> Path:
     """마크다운 리포트를 생성하고 파일 경로를 반환."""
     reports_dir.mkdir(parents=True, exist_ok=True)
@@ -35,6 +37,7 @@ def generate_report(
         expected_session_count=expected_session_count,
         deferred_sessions=deferred_sessions,
         blocked_drafts=blocked_drafts,
+        potential_duplicates=potential_duplicates,
     )
     report_path.write_text(content, encoding="utf-8")
     return report_path
@@ -47,6 +50,7 @@ def write_source_rollup(
     expected_session_count: int | None = None,
     deferred_sessions: dict[str, str] | None = None,
     blocked_drafts: list[BlockedSonnetDraft] | None = None,
+    potential_duplicates: list[PotentialDuplicateWarning] | None = None,
 ) -> Path:
     """소스 날짜별 최신 상태를 덮어쓰는 canonical rollup을 작성."""
     rollup_dir = reports_dir / "by-date"
@@ -58,6 +62,7 @@ def write_source_rollup(
         expected_session_count=expected_session_count,
         deferred_sessions=deferred_sessions,
         blocked_drafts=blocked_drafts,
+        potential_duplicates=potential_duplicates,
     )
     report_path.write_text(content, encoding="utf-8")
     return report_path
@@ -69,9 +74,11 @@ def _build_report_markdown(
     expected_session_count: int | None = None,
     deferred_sessions: dict[str, str] | None = None,
     blocked_drafts: list[BlockedSonnetDraft] | None = None,
+    potential_duplicates: list[PotentialDuplicateWarning] | None = None,
 ) -> str:
     deferred_sessions = deferred_sessions or {}
     blocked_drafts = blocked_drafts or []
+    potential_duplicates = potential_duplicates or []
     strong = [v for v in verdicts if v.verdict == "strong_candidate"]
     borderline = [v for v in verdicts if v.verdict == "borderline"]
     skipped = [v for v in verdicts if v.verdict == "skip"]
@@ -124,6 +131,17 @@ def _build_report_markdown(
             lines.append(f"### {title} ({blocked.session_id})")
             for issue in blocked.issues:
                 lines.append(f"- {issue.message}")
+            lines.append("")
+
+    if potential_duplicates:
+        lines.append("## Potential Duplicates\n")
+        for warning in potential_duplicates:
+            title = warning.verdict.suggested_title or "(untitled)"
+            lines.append(f"### {title} ({warning.session_id})")
+            for match in warning.matches:
+                lines.append(
+                    f"- {match.title} ({match.path.name}, similarity {match.similarity:.2f})"
+                )
             lines.append("")
 
     # Skipped
@@ -226,16 +244,15 @@ def write_sonnet_notes(
             filepath = sonnet_dir / filename
 
         content = (
-            f"{_session_marker(v.session_id)}\n"
-            f"# {v.suggested_title}\n\n"
-            f"> 한 줄 요약: {draft.get('summary', '')}\n\n"
-            f"## 생각\n\n"
-            f"{draft.get('thought', '')}\n\n"
-            f"## 연결되는 것들\n\n"
-            f"{draft.get('connections', '')}\n\n"
-            f"## 출처/계기\n\n"
-            f"{draft.get('source', '')}\n\n"
-            f"#sonnet #from/ai-session {' '.join(v.connected_themes)}\n"
+            sonnet_catalog.render_sonnet_note(
+                session_id=v.session_id,
+                title=v.suggested_title,
+                summary=draft.get("summary", ""),
+                thought=draft.get("thought", ""),
+                connections=draft.get("connections", ""),
+                source=draft.get("source", ""),
+                subject_tags=v.connected_themes,
+            )
         )
 
         filepath.write_text(content, encoding="utf-8")

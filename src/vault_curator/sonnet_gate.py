@@ -7,10 +7,12 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from pathlib import Path
 import re
 
 from vault_curator.evaluator import SessionVerdict
+from vault_curator import sonnet_catalog
 
 
 _SESSION_MARKER_TEMPLATE = "<!-- vault-curator:session_id={session_id} -->"
@@ -50,6 +52,23 @@ class ExistingSonnetNote:
     path: Path
     title: str
     session_id: str | None
+
+
+@dataclass(frozen=True)
+class DuplicateCandidate:
+    title: str
+    path: Path
+    similarity: float
+
+
+@dataclass(frozen=True)
+class PotentialDuplicateWarning:
+    verdict: SessionVerdict
+    matches: tuple[DuplicateCandidate, ...]
+
+    @property
+    def session_id(self) -> str:
+        return self.verdict.session_id
 
 
 def apply_admission_gate(
@@ -153,6 +172,23 @@ def inspect_verdict(
                 )
             )
 
+    connections = str(draft.get("connections", "")).strip()
+    if connections:
+        if sonnet_catalog.looks_like_python_list(connections):
+            issues.append(
+                GateIssue(
+                    "python_list_connections",
+                    "connections가 Python list 형태로 남아 있습니다.",
+                )
+            )
+        if sonnet_catalog.is_tag_only_connections(connections):
+            issues.append(
+                GateIssue(
+                    "tag_only_connections",
+                    "connections가 태그만으로 구성되어 있습니다.",
+                )
+            )
+
     existing_notes = (
         existing_notes if existing_notes is not None else _load_existing_notes(sonnet_dir)
     )
@@ -220,6 +256,52 @@ def inspect_verdict(
             break
 
     return issues
+
+
+def find_potential_duplicates(
+    verdicts: list[SessionVerdict],
+    sonnet_dir: Path,
+    *,
+    similarity_threshold: float = 0.6,
+    max_matches: int = 3,
+) -> list[PotentialDuplicateWarning]:
+    """기존 top-level Sonnet과 유사한 strong_candidate 제목을 warning으로 찾는다."""
+    existing_notes = _load_existing_notes(sonnet_dir)
+    warnings: list[PotentialDuplicateWarning] = []
+
+    for verdict in verdicts:
+        if verdict.verdict != "strong_candidate":
+            continue
+        title = verdict.suggested_title.strip()
+        if not title:
+            continue
+
+        matches: list[DuplicateCandidate] = []
+        for note in existing_notes:
+            if not note.title or note.session_id == verdict.session_id:
+                continue
+            similarity = _title_similarity(title, note.title)
+            if similarity < similarity_threshold or note.title == title:
+                continue
+            matches.append(
+                DuplicateCandidate(
+                    title=note.title,
+                    path=note.path,
+                    similarity=similarity,
+                )
+            )
+
+        if not matches:
+            continue
+        matches.sort(key=lambda item: item.similarity, reverse=True)
+        warnings.append(
+            PotentialDuplicateWarning(
+                verdict=verdict,
+                matches=tuple(matches[:max_matches]),
+            )
+        )
+
+    return warnings
 
 
 def _load_existing_notes(sonnet_dir: Path) -> list[ExistingSonnetNote]:
@@ -361,3 +443,11 @@ def _find_existing_note_path(
             legacy_matches.append(path)
 
     return legacy_matches[0] if len(legacy_matches) == 1 else None
+
+
+def _title_similarity(left: str, right: str) -> float:
+    left_norm = re.sub(r"\s+", " ", left).strip().casefold()
+    right_norm = re.sub(r"\s+", " ", right).strip().casefold()
+    if not left_norm or not right_norm:
+        return 0.0
+    return SequenceMatcher(None, left_norm, right_norm).ratio()

@@ -134,3 +134,54 @@ def test_apply_admission_gate_blocks_duplicate_titles_within_batch(
         any(issue.code == "duplicate_title_in_batch" for issue in blocked_item.issues)
         for blocked_item in blocked
     )
+
+
+def test_apply_admission_gate_blocks_python_list_connections(tmp_path) -> None:
+    verdict = _strong_verdict(
+        "2026-04-12_09:37",
+        connections="['개념1', '개념2']",
+    )
+
+    admitted, blocked = sonnet_gate.apply_admission_gate([verdict], tmp_path)
+
+    assert admitted == []
+    assert len(blocked) == 1
+    assert {issue.code for issue in blocked[0].issues} == {
+        "python_list_connections"
+    }
+
+
+def test_apply_admission_gate_blocks_tag_only_connections(tmp_path) -> None:
+    verdict = _strong_verdict(
+        "2026-04-12_09:38",
+        connections="#tech/ai #investment",
+    )
+
+    admitted, blocked = sonnet_gate.apply_admission_gate([verdict], tmp_path)
+
+    assert admitted == []
+    assert len(blocked) == 1
+    assert {issue.code for issue in blocked[0].issues} == {
+        "tag_only_connections"
+    }
+
+
+def test_find_potential_duplicates_returns_similarity_warnings(
+    tmp_path,
+) -> None:
+    existing = tmp_path / "existing.md"
+    existing.write_text(
+        "<!-- vault-curator:session_id=2026-04-12_09:00 -->\n"
+        "# 메모리 슈퍼사이클과 외생 변수\n\n본문\n",
+        encoding="utf-8",
+    )
+    verdict = _strong_verdict(
+        "2026-04-12_09:39",
+        title="메모리 사이클의 외생 변수",
+    )
+
+    warnings = sonnet_gate.find_potential_duplicates([verdict], tmp_path)
+
+    assert len(warnings) == 1
+    assert warnings[0].session_id == "2026-04-12_09:39"
+    assert warnings[0].matches[0].title == "메모리 슈퍼사이클과 외생 변수"

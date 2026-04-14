@@ -19,8 +19,11 @@ The project is designed around a simple idea:
 - session-level incremental processing backed by persisted state
 - two-stage Sonnet generation: verdict first, draft generation only for `strong_candidate`
 - optional Sonnet polish step tuned to the user's writing voice
+- deterministic normalization for Sonnet `connections` and subject tags before Vault write
 - Sonnet admission gate that blocks structurally invalid drafts before Vault write
+- soft duplicate warnings for titles that look similar to existing Sonnet notes
 - deferred reporting when a strong candidate cannot yet be drafted safely
+- top-level `Vault/Sonnet/index.md` rebuilds from existing Sonnet notes
 - timestamped reports plus canonical by-date rollups
 
 ## Workflow
@@ -36,8 +39,9 @@ The default flow is:
 7. For `strong_candidate` sessions, generate Sonnet drafts in separate follow-up calls
 8. Run a polish pass by default
 9. Run an admission gate before Sonnet write
-10. Write a review report
+10. Write a review report, including soft duplicate warnings when relevant
 11. Write only admitted Sonnet notes into `Vault/Sonnet`
+12. Rebuild `Vault/Sonnet/index.md` from the current top-level Sonnet notes
 
 ## Architecture
 
@@ -50,6 +54,7 @@ The CLI is intentionally thin and delegates to focused modules:
 - `drafting.py`: Sonnet draft generation, compact fallback, and polish
 - `sonnet_gate.py`: deterministic Sonnet admission checks before write
 - `finalization.py`: reports, Sonnet note writes, and state updates
+- `sonnet_catalog.py`: top-level Sonnet parsing, connection normalization, and index generation
 - `pipeline.py`: file-level orchestration
 
 ## Local Model Configuration
@@ -142,9 +147,24 @@ The gate currently blocks drafts when they have obvious structural problems such
 - missing required fields like `summary`, `thought`, or `source`
 - a `thought` body that is not exactly four sentences
 - placeholder-style text such as `TBD`
+- `connections` left as a Python-style list string
+- `connections` made only of tags
 - title or filepath conflicts with existing Sonnet notes
 
 Blocked drafts are not written into the vault. Instead they are listed in the report under `Blocked by Admission Gate`, and they are not marked as completed in state so they can be revisited on a later run.
+
+The report can also surface soft duplicate warnings when a new strong candidate title looks similar to an existing top-level Sonnet note. These warnings do not block writes; they are meant for observation and threshold tuning.
+
+## Sonnet Normalization
+
+Before write, `vault-curator` normalizes generated Sonnet drafts against the current top-level `Vault/Sonnet/*.md` catalog.
+
+- `connections` are rewritten into a stable line-by-line format
+- exact title matches to existing Sonnet notes are converted into `[[file_stem|title]]` wikilinks
+- unresolved items remain plain text instead of creating broken links
+- writer-managed tags such as `#sonnet` and `#from/ai-session` are applied by the writer stage, while model-provided subject tags are filtered against the taxonomy
+
+After writes, `Vault/Sonnet/index.md` is rebuilt from the current top-level Sonnet notes so the index stays idempotent across reruns.
 
 ## Automation
 
