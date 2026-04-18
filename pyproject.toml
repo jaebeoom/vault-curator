@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "vault-curator"
 version = "0.1.0"
-description = "AI-powered quality filter for Haiku → Sonnet promotion"
+description = "AI-powered quality filter for Capture → Synthesis promotion"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

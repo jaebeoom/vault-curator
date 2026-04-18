@@ -1,4 +1,4 @@
-"""리포트, Sonnet 노트, state를 최종 반영."""
+"""리포트, Synthesis 노트, state를 최종 반영."""
 
 from __future__ import annotations
 
@@ -12,8 +12,8 @@ from vault_curator import (
     evaluator,
     report,
     runtime,
-    sonnet_catalog,
-    sonnet_gate,
+    synthesis_catalog,
+    synthesis_gate,
     state,
 )
 
@@ -32,7 +32,7 @@ def finalize_result(
     deferred_sessions: dict[str, str] | None = None,
     source_dates: list[str] | None = None,
 ) -> None:
-    _, sonnet_dir, polaris_dir, reports_dir, _ = runtime.resolve_paths(
+    _, synthesis_dir, polaris_dir, reports_dir, _ = runtime.resolve_paths(
         cfg, project_dir=project_dir
     )
 
@@ -43,9 +43,9 @@ def finalize_result(
     raw = rfile.read_text(encoding="utf-8")
     verdicts = evaluator.parse_verdicts(raw)
     allowed_subject_tags = context.load_subject_tags(polaris_dir)
-    verdicts = sonnet_catalog.normalize_verdicts(
+    verdicts = synthesis_catalog.normalize_verdicts(
         verdicts,
-        sonnet_dir,
+        synthesis_dir,
         allowed_subject_tags,
     )
     expected_entries = (
@@ -63,13 +63,13 @@ def finalize_result(
             "[yellow]경고: 기대 세션 메타가 없어 coverage 검증과 상태 갱신을 건너뜁니다.[/yellow]"
         )
 
-    admitted_verdicts, blocked_drafts = sonnet_gate.apply_admission_gate(
+    admitted_verdicts, blocked_drafts = synthesis_gate.apply_admission_gate(
         verdicts,
-        sonnet_dir,
+        synthesis_dir,
     )
-    potential_duplicates = sonnet_gate.find_potential_duplicates(
+    potential_duplicates = synthesis_gate.find_potential_duplicates(
         admitted_verdicts,
-        sonnet_dir,
+        synthesis_dir,
     )
     blocked_session_ids = {blocked.session_id for blocked in blocked_drafts}
     admitted_entries = (
@@ -111,21 +111,21 @@ def finalize_result(
             reason_text = "; ".join(issue.message for issue in blocked.issues)
             console.print(f"  → {blocked.session_id}: {reason_text}")
 
-    written = report.write_sonnet_notes(admitted_verdicts, sonnet_dir)
-    index_path = sonnet_catalog.write_index(sonnet_dir)
+    written = report.write_synthesis_notes(admitted_verdicts, synthesis_dir)
+    index_path = synthesis_catalog.write_index(synthesis_dir)
     if written:
         console.print(
-            f"[bold green]Sonnet 노트 {len(written)}개 생성:[/bold green]"
+            f"[bold green]Synthesis 노트 {len(written)}개 생성:[/bold green]"
         )
         for path in written:
             console.print(f"  → {path.name}")
-    console.print(f"[dim]Sonnet index:[/dim] {index_path}")
+    console.print(f"[dim]Synthesis index:[/dim] {index_path}")
 
     if meta_file.exists():
-        haiku_dir, _, _, _, _ = runtime.resolve_paths(
+        capture_dir, _, _, _, _ = runtime.resolve_paths(
             cfg, project_dir=project_dir
         )
-        st = state.load_state(project_dir, haiku_dir=haiku_dir)
+        st = state.load_state(project_dir, capture_dir=capture_dir)
         if admitted_entries:
             state.save_state(
                 project_dir,

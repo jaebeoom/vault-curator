@@ -1,4 +1,4 @@
-# Sonnet Admission Gate Plan
+# Synthesis Admission Gate Plan
 
 > 2026-04-12 수정.
 > 대상 프로젝트: `Projects/vault-curator`
@@ -10,12 +10,12 @@
 
 지금은 `vault-curator`에 별도 `health-check` 서브시스템을 추가하지 않는다.
 
-대신 기존 `Haiku -> Sonnet` 파이프라인 안에 **Sonnet admission gate**를 넣는다.
+대신 기존 `Capture -> Synthesis` 파이프라인 안에 **Synthesis admission gate**를 넣는다.
 
-- 목적은 "Vault 전체 감사"가 아니라 "형태적으로 실패한 Sonnet 적재 차단"
+- 목적은 "Vault 전체 감사"가 아니라 "형태적으로 실패한 Synthesis 적재 차단"
 - 리포트, 로그, 상태파일은 계속 **프로젝트(repo) 내부**에 둔다
 - `Polaris/AI`는 계속 **입력 컨텍스트**로만 사용한다
-- `Haiku` 원문은 수정하지 않는다
+- `Capture` 원문은 수정하지 않는다
 
 ---
 
@@ -23,7 +23,7 @@
 
 기존 health-check 구상은 범위가 너무 넓었다.
 
-- 현재 더 큰 문제는 `기존 Sonnet 전체의 건강도`보다 `생성 직후 Sonnet 품질 안정성`이다
+- 현재 더 큰 문제는 `기존 Synthesis 전체의 건강도`보다 `생성 직후 Synthesis 품질 안정성`이다
 - broad audit를 먼저 만들면 증상 보고서는 늘어나지만 생성 실패 원인은 그대로 남을 수 있다
 - `Polaris`는 운영 산출물 저장소가 아니라 AI 컨텍스트 폴더다
 - Vault는 second brain 레이어이고, 운영 로그/리포트 저장 위치로는 repo 내부가 더 자연스럽다
@@ -34,12 +34,12 @@
 
 ## 3. 목표
 
-기존 파이프라인에서 생성된 Sonnet 초안이 아래 조건을 만족하지 못하면 Vault에 쓰지 않는다.
+기존 파이프라인에서 생성된 Synthesis 초안이 아래 조건을 만족하지 못하면 Vault에 쓰지 않는다.
 
 1. 제목이 비어 있지 않다
 2. 필수 필드가 비어 있지 않다
 3. 최소 구조 규칙을 만족한다
-4. 기존 Sonnet와 충돌 위험이 과도하지 않다
+4. 기존 Synthesis와 충돌 위험이 과도하지 않다
 5. 실패 사유가 repo 내부 리포트에 남는다
 
 이 기능은 "좋은 글을 보장"하지 않는다.
@@ -54,12 +54,12 @@
 - Vault 전체 대상 `health-check` CLI
 - `Polaris` 또는 `Archive` 스캔
 - Vault 내부 `Polaris/Reports/...` 리포트 저장
-- Sonnet 자동 수정
-- AI 기반 Sonnet 의미 품질 평가
+- Synthesis 자동 수정
+- AI 기반 Synthesis 의미 품질 평가
 - `weak-source`, `orphan`, `contradiction` 같은 광범위 감사
-- `Haiku` 원문에 ID를 주입하는 작업
+- `Capture` 원문에 ID를 주입하는 작업
 
-명시적 Haiku ID가 필요하다면, 그것은 원칙적으로 Haiku를 생성하는 upstream 프로젝트 책임이다.
+명시적 Capture ID가 필요하다면, 그것은 원칙적으로 Capture를 생성하는 upstream 프로젝트 책임이다.
 
 ---
 
@@ -93,13 +93,13 @@ v1에서는 가능하면 새 상태파일 없이 구현한다.
 
 ### 6.1 Admission gate 대상
 
-gate는 `strong_candidate`에 대해 draft 생성 및 optional polish가 끝난 뒤, Sonnet 파일 쓰기 직전에 실행한다.
+gate는 `strong_candidate`에 대해 draft 생성 및 optional polish가 끝난 뒤, Synthesis 파일 쓰기 직전에 실행한다.
 
 위치 기준:
 
 - 초안 생성: `drafting.py`
 - 최종 반영: `finalization.py`
-- 실제 gate 호출은 `finalization` 직전 또는 `write_sonnet_notes` 직전에 두는 것이 자연스럽다
+- 실제 gate 호출은 `finalization` 직전 또는 `write_synthesis_notes` 직전에 두는 것이 자연스럽다
 
 ### 6.2 Deterministic checks
 
@@ -118,13 +118,13 @@ v1에서는 deterministic rule만 적용한다.
 5. `session marker safety`
    - 다른 `session_id`를 가진 기존 노트를 잘못 덮어쓸 위험이 있으면 차단
 6. `title / filename collision risk`
-   - 기존 Sonnet 파일과 제목 또는 filename stem이 충돌하면 차단 또는 경고
+   - 기존 Synthesis 파일과 제목 또는 filename stem이 충돌하면 차단 또는 경고
 
 ### 6.3 차단 시 동작
 
 gate 실패 시:
 
-- 해당 Sonnet 노트는 Vault에 쓰지 않는다
+- 해당 Synthesis 노트는 Vault에 쓰지 않는다
 - 실패 사유를 repo 내부 리포트에 남긴다
 - 세션 자체를 조용히 성공 처리하지 않는다
 
@@ -170,18 +170,18 @@ PYTHONPATH=src uv run python -m vault_curator.cli local-run \
 - `tag-taxonomy.md`
 - `writing-voice.md`
 
-이 폴더는 Sonnet 생성 프롬프트의 입력으로만 쓰고, 운영 리포트/로그를 쌓는 장소로 쓰지 않는다.
+이 폴더는 Synthesis 생성 프롬프트의 입력으로만 쓰고, 운영 리포트/로그를 쌓는 장소로 쓰지 않는다.
 
 ---
 
-## 9. Haiku ID에 대한 정리
+## 9. Capture ID에 대한 정리
 
-현재 `Haiku` 문서에는 명시적 고정 ID가 없다.
+현재 `Capture` 문서에는 명시적 고정 ID가 없다.
 `vault-curator`는 날짜/시각과 내용 해시 기반의 파생 `session_id`를 내부적으로 사용한다.
 
 이번 계획의 원칙:
 
-- `vault-curator`가 `Haiku` 원문을 수정해서 ID를 주입하지 않는다
+- `vault-curator`가 `Capture` 원문을 수정해서 ID를 주입하지 않는다
 - upstream에서 explicit ID가 도입되면, 이후 `vault-curator`가 그것을 읽도록 확장할 수 있다
 - admission gate 작업은 explicit ID 도입 전에도 진행 가능하다
 
@@ -196,8 +196,8 @@ PYTHONPATH=src uv run python -m vault_curator.cli local-run \
 추가 파일:
 
 ```text
-src/vault_curator/sonnet_gate.py
-tests/test_sonnet_gate.py
+src/vault_curator/synthesis_gate.py
+tests/test_synthesis_gate.py
 ```
 
 수정 파일:
@@ -212,8 +212,8 @@ README.md
 필요 시 나중에만 추가:
 
 ```text
-src/vault_curator/audit_sonnet.py
-tests/test_audit_sonnet.py
+src/vault_curator/audit_synthesis.py
+tests/test_audit_synthesis.py
 ```
 
 초기에는 큰 서브시스템으로 분해하지 않는다.
@@ -222,13 +222,13 @@ tests/test_audit_sonnet.py
 
 ## 11. 역할 분리
 
-- `sonnet_gate.py`
+- `synthesis_gate.py`
   - gate rule 정의
   - draft 검사
   - 차단 사유 구조화
 - `finalization.py`
   - gate 실행 orchestration
-  - 통과한 verdict만 Sonnet write 단계로 전달
+  - 통과한 verdict만 Synthesis write 단계로 전달
 - `report.py`
   - blocked draft 섹션 추가
   - 기존 리포트 포맷 확장
@@ -249,9 +249,9 @@ tests/test_audit_sonnet.py
 
 - isolated unit test에서 기본 실패 사례를 분류할 수 있다
 
-### Phase 2. Sonnet 충돌 검사
+### Phase 2. Synthesis 충돌 검사
 
-1. 기존 Sonnet 디렉토리 스캔
+1. 기존 Synthesis 디렉토리 스캔
 2. `session_id` marker 충돌 검사
 3. 제목/filename 충돌 위험 검사
 
@@ -262,12 +262,12 @@ tests/test_audit_sonnet.py
 ### Phase 3. Pipeline 연결
 
 1. `finalization`에 gate 적용
-2. blocked verdict는 Sonnet write 대상에서 제외
+2. blocked verdict는 Synthesis write 대상에서 제외
 3. console summary에 통과/차단 수 표시
 
 완료 기준:
 
-- 한 번의 `local-run`에서 통과분만 Sonnet에 적힌다
+- 한 번의 `local-run`에서 통과분만 Synthesis에 적힌다
 
 ### Phase 4. Report 확장
 
@@ -277,7 +277,7 @@ tests/test_audit_sonnet.py
 
 완료 기준:
 
-- Sonnet에 안 적힌 이유를 repo 내부에서 추적할 수 있다
+- Synthesis에 안 적힌 이유를 repo 내부에서 추적할 수 있다
 
 ---
 
@@ -291,12 +291,12 @@ tests/test_audit_sonnet.py
 4. placeholder text 차단
 5. 기존 session marker 충돌 차단
 6. title / filename collision 검사
-7. gate 실패 시 Sonnet 파일이 쓰이지 않는지
+7. gate 실패 시 Synthesis 파일이 쓰이지 않는지
 8. gate 실패 사유가 리포트에 나타나는지
 
 fixture 원칙:
 
-- 실제 Sonnet 축소판 같은 작은 디렉토리 구조
+- 실제 Synthesis 축소판 같은 작은 디렉토리 구조
 - 기존 노트 2~4개
 - 새 draft 3~5개
 - 통과 사례와 차단 사례를 모두 포함
@@ -308,7 +308,7 @@ fixture 원칙:
 아래가 되면 v1 완료로 본다.
 
 1. 기존 `local-run` / `watch-local` 흐름에서 admission gate가 동작한다
-2. gate 실패 draft는 Sonnet에 쓰이지 않는다
+2. gate 실패 draft는 Synthesis에 쓰이지 않는다
 3. 실패 사유가 repo 내부 리포트에 남는다
 4. `Polaris/AI`는 계속 컨텍스트 입력으로만 쓰인다
 5. 운영 리포트는 Vault가 아니라 repo 내부에 남는다
@@ -321,9 +321,9 @@ fixture 원칙:
 
 다음은 필요할 때만 검토한다.
 
-1. upstream Haiku generator의 explicit session ID 도입
-2. 수동 실행형 `audit-sonnet` 명령
-3. Sonnet 구조 lint의 범위 확대
+1. upstream Capture generator의 explicit session ID 도입
+2. 수동 실행형 `audit-synthesis` 명령
+3. Synthesis 구조 lint의 범위 확대
 4. 장기적으로 필요한 경우에만 Vault-level audit 재논의
 
 여기서도 원칙은 같다.
@@ -337,9 +337,9 @@ fixture 원칙:
 
 다음 세션에서는 아래 순서로 바로 시작하면 된다.
 
-1. `src/vault_curator/sonnet_gate.py`
+1. `src/vault_curator/synthesis_gate.py`
    - gate rule과 failure 모델 구현
-2. `tests/test_sonnet_gate.py`
+2. `tests/test_synthesis_gate.py`
    - fixture와 차단 케이스 먼저 작성
 3. `src/vault_curator/finalization.py`
    - gate 적용 및 write blocker 연결

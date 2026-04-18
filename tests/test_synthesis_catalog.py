@@ -1,10 +1,10 @@
 from datetime import datetime
 
-from vault_curator import sonnet_catalog
+from vault_curator import synthesis_catalog
 
 
 def test_normalize_connections_items_rewrites_exact_matches_and_drops_tags() -> None:
-    note = sonnet_catalog.SonnetNote(
+    note = synthesis_catalog.SynthesisNote(
         path=None,  # type: ignore[arg-type]
         date="2026-04-01",
         file_stem="2026-04-01_10-00__기존_노트",
@@ -16,9 +16,9 @@ def test_normalize_connections_items_rewrites_exact_matches_and_drops_tags() -> 
         subject_tags=("#tech/ai",),
         session_id="2026-04-01_10:00",
     )
-    lookup = sonnet_catalog.build_lookup([note])
+    lookup = synthesis_catalog.build_lookup([note])
 
-    items = sonnet_catalog.normalize_connections_items(
+    items = synthesis_catalog.normalize_connections_items(
         "['기존 노트', '#tech/ai', '새 개념']",
         lookup,
     )
@@ -29,12 +29,12 @@ def test_normalize_connections_items_rewrites_exact_matches_and_drops_tags() -> 
     ]
 
 
-def test_normalize_existing_sonnet_notes_rewrites_connections_and_tags(
+def test_normalize_existing_synthesis_notes_rewrites_connections_and_tags(
     tmp_path,
 ) -> None:
-    sonnet_dir = tmp_path / "Sonnet"
-    sonnet_dir.mkdir()
-    note = sonnet_dir / "2026-04-12_09-30__테스트.md"
+    synthesis_dir = tmp_path / "Synthesis"
+    synthesis_dir.mkdir()
+    note = synthesis_dir / "2026-04-12_09-30__테스트.md"
     note.write_text(
         "\n".join(
             [
@@ -55,14 +55,14 @@ def test_normalize_existing_sonnet_notes_rewrites_connections_and_tags(
                 "",
                 "출처",
                 "",
-                "#sonnet #from/ai-session #tech/ai #unknown #from/ai-session",
+                "#stage/synthesis #from/ai-session #tech/ai #unknown #from/ai-session",
             ]
         ),
         encoding="utf-8",
     )
 
-    changed = sonnet_catalog.normalize_existing_sonnet_notes(
-        sonnet_dir,
+    changed = synthesis_catalog.normalize_existing_synthesis_notes(
+        synthesis_dir,
         {"#tech/ai", "#investment"},
     )
 
@@ -71,13 +71,13 @@ def test_normalize_existing_sonnet_notes_rewrites_connections_and_tags(
     assert "['개념1', '#tech/ai']" not in text
     assert "\n개념1\n" in text
     assert "#unknown" not in text
-    assert text.rstrip().endswith("#sonnet #from/ai-session #tech/ai")
+    assert text.rstrip().endswith("#stage/synthesis #from/ai-session #tech/ai")
 
 
 def test_write_index_builds_table_for_top_level_notes(tmp_path) -> None:
-    sonnet_dir = tmp_path / "Sonnet"
-    sonnet_dir.mkdir()
-    (sonnet_dir / "2026-04-12_09-30__테스트.md").write_text(
+    synthesis_dir = tmp_path / "Synthesis"
+    synthesis_dir.mkdir()
+    (synthesis_dir / "2026-04-12_09-30__테스트.md").write_text(
         "\n".join(
             [
                 "<!-- vault-curator:session_id=2026-04-12_09:30 -->",
@@ -97,19 +97,19 @@ def test_write_index_builds_table_for_top_level_notes(tmp_path) -> None:
                 "",
                 "출처",
                 "",
-                "#sonnet #from/ai-session #tech/ai",
+                "#stage/synthesis #from/ai-session #tech/ai",
             ]
         ),
         encoding="utf-8",
     )
 
-    index_path = sonnet_catalog.write_index(
-        sonnet_dir,
+    index_path = synthesis_catalog.write_index(
+        synthesis_dir,
         generated_at=datetime(2026, 4, 14, 9, 0),
     )
 
     text = index_path.read_text(encoding="utf-8")
     assert index_path.name == "index.md"
-    assert "# Sonnet Index" in text
+    assert "# Synthesis Index" in text
     assert "마지막 업데이트: 2026-04-14" in text
     assert "[[2026-04-12_09-30__테스트|테스트]]" in text

@@ -36,11 +36,49 @@ def resolve_paths(
 ) -> tuple[Path, Path, Path, Path, Path]:
     paths = cfg["paths"]
     vault = Path(paths["vault_root"]).expanduser()
-    haiku = vault / paths["haiku_dir"]
-    sonnet = vault / paths["sonnet_dir"]
+    capture = _resolve_stage_dir(
+        vault,
+        paths,
+        primary_key="capture_dir",
+        legacy_key="haiku_dir",
+        default_name="Capture",
+        legacy_default_name="Haiku",
+    )
+    synthesis = _resolve_stage_dir(
+        vault,
+        paths,
+        primary_key="synthesis_dir",
+        legacy_key="sonnet_dir",
+        default_name="Synthesis",
+        legacy_default_name="Sonnet",
+    )
     polaris = vault / paths["polaris_dir"]
     reports = project_dir / paths["reports_dir"]
-    return haiku, sonnet, polaris, reports, vault
+    return capture, synthesis, polaris, reports, vault
+
+
+def _resolve_stage_dir(
+    vault: Path,
+    paths: dict,
+    *,
+    primary_key: str,
+    legacy_key: str,
+    default_name: str,
+    legacy_default_name: str,
+) -> Path:
+    configured = paths.get(primary_key)
+    if configured is None:
+        configured = paths.get(legacy_key, default_name)
+
+    candidate = vault / str(configured)
+    migrated_default = vault / default_name
+    if (
+        configured == legacy_default_name
+        and not candidate.exists()
+        and migrated_default.exists()
+    ):
+        return migrated_default
+    return candidate
 
 
 def load_expected_session_entries(

@@ -1,4 +1,4 @@
-from vault_curator import sonnet_gate
+from vault_curator import synthesis_gate
 from vault_curator.evaluator import SessionVerdict
 
 
@@ -18,7 +18,7 @@ def _strong_verdict(
         core_idea="핵심",
         suggested_title=title,
         connected_themes=["#tech/ai"],
-        sonnet_draft={
+        synthesis_draft={
             "summary": summary,
             "thought": thought,
             "connections": connections,
@@ -37,7 +37,7 @@ def test_apply_admission_gate_blocks_empty_title_and_missing_fields(
         source="",
     )
 
-    admitted, blocked = sonnet_gate.apply_admission_gate([verdict], tmp_path)
+    admitted, blocked = synthesis_gate.apply_admission_gate([verdict], tmp_path)
 
     assert admitted == []
     assert len(blocked) == 1
@@ -58,7 +58,7 @@ def test_apply_admission_gate_blocks_invalid_thought_and_placeholder_text(
         summary="TBD",
     )
 
-    admitted, blocked = sonnet_gate.apply_admission_gate([verdict], tmp_path)
+    admitted, blocked = synthesis_gate.apply_admission_gate([verdict], tmp_path)
 
     assert admitted == []
     assert len(blocked) == 1
@@ -79,7 +79,7 @@ def test_apply_admission_gate_blocks_title_collision_with_existing_note(
     )
     verdict = _strong_verdict("2026-04-12_09:32", title="같은 제목")
 
-    admitted, blocked = sonnet_gate.apply_admission_gate([verdict], tmp_path)
+    admitted, blocked = synthesis_gate.apply_admission_gate([verdict], tmp_path)
 
     assert admitted == []
     assert len(blocked) == 1
@@ -97,7 +97,7 @@ def test_apply_admission_gate_allows_existing_session_note_reuse(
     )
     verdict = _strong_verdict("2026-04-12_09:33", title="새 제목")
 
-    admitted, blocked = sonnet_gate.apply_admission_gate([verdict], tmp_path)
+    admitted, blocked = synthesis_gate.apply_admission_gate([verdict], tmp_path)
 
     assert admitted == [verdict]
     assert blocked == []
@@ -110,7 +110,7 @@ def test_apply_admission_gate_blocks_existing_file_conflict(
     conflict.write_text("# 수동 생성된 파일\n", encoding="utf-8")
     verdict = _strong_verdict("2026-04-12_09:34", title="제목")
 
-    admitted, blocked = sonnet_gate.apply_admission_gate([verdict], tmp_path)
+    admitted, blocked = synthesis_gate.apply_admission_gate([verdict], tmp_path)
 
     assert admitted == []
     assert len(blocked) == 1
@@ -123,7 +123,7 @@ def test_apply_admission_gate_blocks_duplicate_titles_within_batch(
     first = _strong_verdict("2026-04-12_09:35", title="중복 제목")
     second = _strong_verdict("2026-04-12_09:36", title="중복 제목")
 
-    admitted, blocked = sonnet_gate.apply_admission_gate(
+    admitted, blocked = synthesis_gate.apply_admission_gate(
         [first, second],
         tmp_path,
     )
@@ -142,7 +142,7 @@ def test_apply_admission_gate_blocks_python_list_connections(tmp_path) -> None:
         connections="['개념1', '개념2']",
     )
 
-    admitted, blocked = sonnet_gate.apply_admission_gate([verdict], tmp_path)
+    admitted, blocked = synthesis_gate.apply_admission_gate([verdict], tmp_path)
 
     assert admitted == []
     assert len(blocked) == 1
@@ -157,7 +157,7 @@ def test_apply_admission_gate_blocks_tag_only_connections(tmp_path) -> None:
         connections="#tech/ai #investment",
     )
 
-    admitted, blocked = sonnet_gate.apply_admission_gate([verdict], tmp_path)
+    admitted, blocked = synthesis_gate.apply_admission_gate([verdict], tmp_path)
 
     assert admitted == []
     assert len(blocked) == 1
@@ -180,7 +180,7 @@ def test_find_potential_duplicates_returns_similarity_warnings(
         title="메모리 사이클의 외생 변수",
     )
 
-    warnings = sonnet_gate.find_potential_duplicates([verdict], tmp_path)
+    warnings = synthesis_gate.find_potential_duplicates([verdict], tmp_path)
 
     assert len(warnings) == 1
     assert warnings[0].session_id == "2026-04-12_09:39"

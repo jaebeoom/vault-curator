@@ -1,6 +1,6 @@
 from datetime import datetime as real_datetime
 
-from vault_curator import report, sonnet_gate
+from vault_curator import report, synthesis_gate
 from vault_curator.evaluator import SessionVerdict
 
 
@@ -18,7 +18,7 @@ def _strong_verdict(session_id: str, title: str) -> SessionVerdict:
         core_idea="핵심",
         suggested_title=title,
         connected_themes=["#tech/ai"],
-        sonnet_draft={
+        synthesis_draft={
             "summary": "요약",
             "thought": "문장1. 문장2. 문장3. 문장4.",
             "connections": "개념1, 개념2",
@@ -73,10 +73,10 @@ def test_generate_report_marks_blocked_drafts(
 
     verdicts = [_strong_verdict("2026-04-07_03:09", "정상 제목")]
     blocked = [
-        sonnet_gate.BlockedSonnetDraft(
+        synthesis_gate.BlockedSynthesisDraft(
             verdict=_strong_verdict("2026-04-07_03:11", "막힌 제목"),
             issues=(
-                sonnet_gate.GateIssue(
+                synthesis_gate.GateIssue(
                     "empty_title",
                     "제목이 비어 있습니다.",
                 ),
@@ -104,10 +104,10 @@ def test_generate_report_marks_potential_duplicates(
 
     verdicts = [_strong_verdict("2026-04-07_03:09", "메모리 사이클의 외생 변수")]
     warnings = [
-        sonnet_gate.PotentialDuplicateWarning(
+        synthesis_gate.PotentialDuplicateWarning(
             verdict=verdicts[0],
             matches=(
-                sonnet_gate.DuplicateCandidate(
+                synthesis_gate.DuplicateCandidate(
                     title="메모리 슈퍼사이클과 외생 변수",
                     path=tmp_path / "existing.md",
                     similarity=0.72,
@@ -146,21 +146,21 @@ def test_write_source_rollup_overwrites_canonical_file(
     assert "> Sessions evaluated: 1" in rollup_path.read_text(encoding="utf-8")
 
 
-def test_write_sonnet_notes_reuses_existing_session_note(tmp_path) -> None:
-    sonnet_dir = tmp_path / "Sonnet"
-    sonnet_dir.mkdir()
-    existing = sonnet_dir / "old-title.md"
+def test_write_synthesis_notes_reuses_existing_session_note(tmp_path) -> None:
+    synthesis_dir = tmp_path / "Synthesis"
+    synthesis_dir.mkdir()
+    existing = synthesis_dir / "old-title.md"
     existing.write_text(
-        "# Old Title\n\n## 출처/계기\n\n2026-04-07_03:09 세션에서 출발\n\n#sonnet #from/ai-session #tech/ai\n",
+        "# Old Title\n\n## 출처/계기\n\n2026-04-07_03:09 세션에서 출발\n\n#stage/synthesis #from/ai-session #tech/ai\n",
         encoding="utf-8",
     )
 
     verdict = _strong_verdict("2026-04-07_03:09", "새 제목")
 
-    written = report.write_sonnet_notes([verdict], sonnet_dir)
+    written = report.write_synthesis_notes([verdict], synthesis_dir)
 
     assert written == [existing]
-    files = list(sonnet_dir.glob("*.md"))
+    files = list(synthesis_dir.glob("*.md"))
     assert files == [existing]
     text = existing.read_text(encoding="utf-8")
     assert "<!-- vault-curator:session_id=2026-04-07_03:09 -->" in text
@@ -169,12 +169,12 @@ def test_write_sonnet_notes_reuses_existing_session_note(tmp_path) -> None:
     )
 
 
-def test_write_sonnet_notes_does_not_reuse_note_on_loose_session_mention(
+def test_write_synthesis_notes_does_not_reuse_note_on_loose_session_mention(
     tmp_path,
 ) -> None:
-    sonnet_dir = tmp_path / "Sonnet"
-    sonnet_dir.mkdir()
-    unrelated = sonnet_dir / "other-note.md"
+    synthesis_dir = tmp_path / "Synthesis"
+    synthesis_dir.mkdir()
+    unrelated = synthesis_dir / "other-note.md"
     unrelated.write_text(
         "# 다른 노트\n\n본문에서 2026-04-07_03:09를 언급만 함.\n",
         encoding="utf-8",
@@ -182,7 +182,7 @@ def test_write_sonnet_notes_does_not_reuse_note_on_loose_session_mention(
 
     verdict = _strong_verdict("2026-04-07_03:09", "새 제목")
 
-    written = report.write_sonnet_notes([verdict], sonnet_dir)
+    written = report.write_synthesis_notes([verdict], synthesis_dir)
 
     assert len(written) == 1
     assert written[0] != unrelated
@@ -190,13 +190,13 @@ def test_write_sonnet_notes_does_not_reuse_note_on_loose_session_mention(
     assert unrelated.exists()
 
 
-def test_write_sonnet_notes_uses_session_id_in_new_filenames(tmp_path) -> None:
+def test_write_synthesis_notes_uses_session_id_in_new_filenames(tmp_path) -> None:
     verdict = _strong_verdict(
         "2026-04-07_03:09",
         "자산의 세대교체: 원가 방어력과 고정비 부담의 트레이드오프",
     )
 
-    written = report.write_sonnet_notes([verdict], tmp_path)
+    written = report.write_synthesis_notes([verdict], tmp_path)
 
     assert len(written) == 1
     assert (

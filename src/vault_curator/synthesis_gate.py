@@ -1,6 +1,6 @@
-"""Sonnet admission gate.
+"""Synthesis admission gate.
 
-적재 전에 형태적으로 실패한 Sonnet 초안을 차단한다.
+적재 전에 형태적으로 실패한 Synthesis 초안을 차단한다.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from pathlib import Path
 import re
 
 from vault_curator.evaluator import SessionVerdict
-from vault_curator import sonnet_catalog
+from vault_curator import synthesis_catalog
 
 
 _SESSION_MARKER_TEMPLATE = "<!-- vault-curator:session_id={session_id} -->"
@@ -38,7 +38,7 @@ class GateIssue:
 
 
 @dataclass(frozen=True)
-class BlockedSonnetDraft:
+class BlockedSynthesisDraft:
     verdict: SessionVerdict
     issues: tuple[GateIssue, ...]
 
@@ -48,7 +48,7 @@ class BlockedSonnetDraft:
 
 
 @dataclass(frozen=True)
-class ExistingSonnetNote:
+class ExistingSynthesisNote:
     path: Path
     title: str
     session_id: str | None
@@ -73,19 +73,19 @@ class PotentialDuplicateWarning:
 
 def apply_admission_gate(
     verdicts: list[SessionVerdict],
-    sonnet_dir: Path,
-) -> tuple[list[SessionVerdict], list[BlockedSonnetDraft]]:
-    """강한 후보 Sonnet draft를 검사해 통과/차단 verdict로 나눈다."""
+    synthesis_dir: Path,
+) -> tuple[list[SessionVerdict], list[BlockedSynthesisDraft]]:
+    """강한 후보 Synthesis draft를 검사해 통과/차단 verdict로 나눈다."""
     strong_titles = [
         verdict.suggested_title.strip()
         for verdict in verdicts
         if verdict.verdict == "strong_candidate" and verdict.suggested_title.strip()
     ]
     title_counts = Counter(strong_titles)
-    existing_notes = _load_existing_notes(sonnet_dir)
+    existing_notes = _load_existing_notes(synthesis_dir)
 
     admitted: list[SessionVerdict] = []
-    blocked: list[BlockedSonnetDraft] = []
+    blocked: list[BlockedSynthesisDraft] = []
 
     for verdict in verdicts:
         if verdict.verdict != "strong_candidate":
@@ -94,13 +94,13 @@ def apply_admission_gate(
 
         issues = inspect_verdict(
             verdict,
-            sonnet_dir,
+            synthesis_dir,
             existing_notes,
             title_counts,
         )
         if issues:
             blocked.append(
-                BlockedSonnetDraft(verdict=verdict, issues=tuple(issues))
+                BlockedSynthesisDraft(verdict=verdict, issues=tuple(issues))
             )
             continue
 
@@ -111,8 +111,8 @@ def apply_admission_gate(
 
 def inspect_verdict(
     verdict: SessionVerdict,
-    sonnet_dir: Path,
-    existing_notes: list[ExistingSonnetNote] | None = None,
+    synthesis_dir: Path,
+    existing_notes: list[ExistingSynthesisNote] | None = None,
     title_counts: Counter[str] | None = None,
 ) -> list[GateIssue]:
     """단일 strong_candidate verdict에 대한 gate 이슈를 계산한다."""
@@ -122,13 +122,13 @@ def inspect_verdict(
         return issues
 
     title = verdict.suggested_title.strip()
-    draft = verdict.sonnet_draft
+    draft = verdict.synthesis_draft
 
     if not draft:
         return [
             GateIssue(
-                "missing_sonnet_draft",
-                "strong_candidate인데 sonnet_draft가 없습니다.",
+                "missing_synthesis_draft",
+                "strong_candidate인데 synthesis_draft가 없습니다.",
             )
         ]
 
@@ -174,14 +174,14 @@ def inspect_verdict(
 
     connections = str(draft.get("connections", "")).strip()
     if connections:
-        if sonnet_catalog.looks_like_python_list(connections):
+        if synthesis_catalog.looks_like_python_list(connections):
             issues.append(
                 GateIssue(
                     "python_list_connections",
                     "connections가 Python list 형태로 남아 있습니다.",
                 )
             )
-        if sonnet_catalog.is_tag_only_connections(connections):
+        if synthesis_catalog.is_tag_only_connections(connections):
             issues.append(
                 GateIssue(
                     "tag_only_connections",
@@ -190,7 +190,7 @@ def inspect_verdict(
             )
 
     existing_notes = (
-        existing_notes if existing_notes is not None else _load_existing_notes(sonnet_dir)
+        existing_notes if existing_notes is not None else _load_existing_notes(synthesis_dir)
     )
     title_counts = title_counts or Counter()
 
@@ -202,11 +202,11 @@ def inspect_verdict(
             )
         )
 
-    existing_path = _find_existing_note_path(sonnet_dir, verdict.session_id)
+    existing_path = _find_existing_note_path(synthesis_dir, verdict.session_id)
     proposed_path = (
         existing_path
         if existing_path is not None
-        else _build_new_note_path(sonnet_dir, verdict.session_id, title)
+        else _build_new_note_path(synthesis_dir, verdict.session_id, title)
     )
 
     if existing_path is None and proposed_path.exists():
@@ -228,7 +228,7 @@ def inspect_verdict(
                     f"재사용 대상 노트에 다른 session_id marker가 있습니다: {existing_path.name}",
                 )
             )
-        elif existing_session_id is None and not _looks_like_legacy_sonnet_note(
+        elif existing_session_id is None and not _looks_like_legacy_synthesis_note(
             existing_path,
             verdict.session_id,
         ):
@@ -250,7 +250,7 @@ def inspect_verdict(
             issues.append(
                 GateIssue(
                     "title_collision",
-                    f"같은 제목을 가진 기존 Sonnet 노트가 있습니다: {note.path.name}",
+                    f"같은 제목을 가진 기존 Synthesis 노트가 있습니다: {note.path.name}",
                 )
             )
             break
@@ -260,13 +260,13 @@ def inspect_verdict(
 
 def find_potential_duplicates(
     verdicts: list[SessionVerdict],
-    sonnet_dir: Path,
+    synthesis_dir: Path,
     *,
     similarity_threshold: float = 0.6,
     max_matches: int = 3,
 ) -> list[PotentialDuplicateWarning]:
-    """기존 top-level Sonnet과 유사한 strong_candidate 제목을 warning으로 찾는다."""
-    existing_notes = _load_existing_notes(sonnet_dir)
+    """기존 top-level Synthesis과 유사한 strong_candidate 제목을 warning으로 찾는다."""
+    existing_notes = _load_existing_notes(synthesis_dir)
     warnings: list[PotentialDuplicateWarning] = []
 
     for verdict in verdicts:
@@ -304,18 +304,18 @@ def find_potential_duplicates(
     return warnings
 
 
-def _load_existing_notes(sonnet_dir: Path) -> list[ExistingSonnetNote]:
-    if not sonnet_dir.exists():
+def _load_existing_notes(synthesis_dir: Path) -> list[ExistingSynthesisNote]:
+    if not synthesis_dir.exists():
         return []
 
-    notes: list[ExistingSonnetNote] = []
-    for path in sorted(sonnet_dir.glob("*.md")):
+    notes: list[ExistingSynthesisNote] = []
+    for path in sorted(synthesis_dir.glob("*.md")):
         try:
             text = path.read_text(encoding="utf-8")
         except OSError:
             continue
         notes.append(
-            ExistingSonnetNote(
+            ExistingSynthesisNote(
                 path=path,
                 title=_extract_title_text(text),
                 session_id=_extract_session_id_from_text(text),
@@ -376,7 +376,7 @@ def _slugify_session_id(session_id: str) -> str:
 
 
 def _build_new_note_path(
-    sonnet_dir: Path,
+    synthesis_dir: Path,
     session_id: str,
     suggested_title: str,
 ) -> Path:
@@ -387,16 +387,16 @@ def _build_new_note_path(
         if safe_title
         else f"{safe_session_id}.md"
     )
-    return sonnet_dir / filename
+    return synthesis_dir / filename
 
 
-def _looks_like_legacy_sonnet_note(path: Path, session_id: str) -> bool:
+def _looks_like_legacy_synthesis_note(path: Path, session_id: str) -> bool:
     try:
         text = path.read_text(encoding="utf-8")
     except OSError:
         return False
 
-    if "#sonnet" not in text or "#from/ai-session" not in text:
+    if not _has_synthesis_signature(text):
         return False
 
     legacy_source_pattern = re.compile(
@@ -407,17 +407,17 @@ def _looks_like_legacy_sonnet_note(path: Path, session_id: str) -> bool:
 
 
 def _find_existing_note_path(
-    sonnet_dir: Path,
+    synthesis_dir: Path,
     session_id: str,
 ) -> Path | None:
     marker = _session_marker(session_id)
     safe_session_id = _slugify_session_id(session_id)
     legacy_matches: list[Path] = []
 
-    if not sonnet_dir.exists():
+    if not synthesis_dir.exists():
         return None
 
-    for path in sorted(sonnet_dir.glob("*.md")):
+    for path in sorted(synthesis_dir.glob("*.md")):
         try:
             text = path.read_text(encoding="utf-8")
         except OSError:
@@ -432,7 +432,7 @@ def _find_existing_note_path(
         ):
             return path
 
-        if "#sonnet" not in text or "#from/ai-session" not in text:
+        if not _has_synthesis_signature(text):
             continue
 
         legacy_source_pattern = re.compile(
@@ -451,3 +451,10 @@ def _title_similarity(left: str, right: str) -> float:
     if not left_norm or not right_norm:
         return 0.0
     return SequenceMatcher(None, left_norm, right_norm).ratio()
+
+
+def _has_synthesis_signature(text: str) -> bool:
+    return (
+        "#from/ai-session" in text
+        and ("#stage/synthesis" in text or "#sonnet" in text)
+    )

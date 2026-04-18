@@ -18,13 +18,13 @@ def _file_hash(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def session_hash(session: parser.HaikuSession) -> str:
+def session_hash(session: parser.CaptureSession) -> str:
     payload = f"{session.session_id}\n{session.raw_text}".encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
 
 
 def build_state_entries(
-    sessions: list[parser.HaikuSession],
+    sessions: list[parser.CaptureSession],
 ) -> dict[str, str]:
     return {session.session_id: session_hash(session) for session in sessions}
 
@@ -54,12 +54,12 @@ def _looks_like_legacy_file_state(data: object) -> bool:
 
 def _migrate_legacy_file_state(
     legacy_state: dict[str, str],
-    haiku_dir: Path,
+    capture_dir: Path,
 ) -> dict[str, str]:
     migrated: dict[str, str] = {}
 
     for filename, recorded_hash in legacy_state.items():
-        path = haiku_dir / filename
+        path = capture_dir / filename
         if not path.exists():
             continue
         if _file_hash(path) != recorded_hash:
@@ -73,12 +73,12 @@ def _migrate_legacy_file_state(
 
 def _migrate_duplicate_session_ids(
     session_state: dict[str, str],
-    haiku_dir: Path,
+    capture_dir: Path,
 ) -> dict[str, str]:
     migrated = dict(session_state)
     changed = False
 
-    for path in sorted(haiku_dir.glob("*.md")):
+    for path in sorted(capture_dir.glob("*.md")):
         sessions = parser.parse_file(path)
         time_counts = Counter(session.time for session in sessions)
         time_seen: Counter[str] = Counter()
@@ -101,7 +101,7 @@ def _migrate_duplicate_session_ids(
 
 def load_state(
     project_dir: Path,
-    haiku_dir: Path | None = None,
+    capture_dir: Path | None = None,
 ) -> dict[str, str]:
     """상태 파일 로드. 구버전 파일-기반 상태는 세션-기반으로 마이그레이션."""
     state_path = _state_path(project_dir)
@@ -112,16 +112,16 @@ def load_state(
     if _is_v2_state(data):
         sessions = data["sessions"]
         loaded = {str(key): str(value) for key, value in sessions.items()}
-        if haiku_dir is None:
+        if capture_dir is None:
             return loaded
 
-        migrated = _migrate_duplicate_session_ids(loaded, haiku_dir)
+        migrated = _migrate_duplicate_session_ids(loaded, capture_dir)
         if migrated != loaded:
             save_state(project_dir, migrated)
         return migrated
 
-    if _looks_like_legacy_file_state(data) and haiku_dir is not None:
-        migrated = _migrate_legacy_file_state(data, haiku_dir)
+    if _looks_like_legacy_file_state(data) and capture_dir is not None:
+        migrated = _migrate_legacy_file_state(data, capture_dir)
         save_state(project_dir, migrated)
         return migrated
 
@@ -142,11 +142,11 @@ def save_state(project_dir: Path, state: dict[str, str]) -> None:
 
 
 def filter_new_sessions(
-    sessions: list[parser.HaikuSession],
+    sessions: list[parser.CaptureSession],
     state: dict[str, str],
-) -> list[parser.HaikuSession]:
+) -> list[parser.CaptureSession]:
     """이미 평가하고 변경 없는 세션을 제외."""
-    new: list[parser.HaikuSession] = []
+    new: list[parser.CaptureSession] = []
     for session in sessions:
         if state.get(session.session_id) != session_hash(session):
             new.append(session)

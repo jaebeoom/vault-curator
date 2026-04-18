@@ -1,4 +1,4 @@
-"""Sonnet 초안 생성과 polish 단계."""
+"""Synthesis 초안 생성과 polish 단계."""
 
 from __future__ import annotations
 
@@ -17,25 +17,25 @@ from vault_curator import (
 )
 
 
-def polish_single_sonnet(
+def polish_single_synthesis(
     verdict: evaluator.SessionVerdict,
     polaris_ctx: str,
     model_cfg: local_client.LocalModelConfig,
     *,
     console: Console,
 ) -> bool:
-    """단일 Sonnet draft를 polish 결과로 덮어쓴다."""
-    assert verdict.sonnet_draft is not None
+    """단일 Synthesis draft를 polish 결과로 덮어쓴다."""
+    assert verdict.synthesis_draft is not None
 
     draft_payload = {
         "title": verdict.suggested_title,
-        "summary": verdict.sonnet_draft.get("summary", ""),
-        "thought": verdict.sonnet_draft.get("thought", ""),
-        "connections": verdict.sonnet_draft.get("connections", ""),
-        "source": verdict.sonnet_draft.get("source", ""),
+        "summary": verdict.synthesis_draft.get("summary", ""),
+        "thought": verdict.synthesis_draft.get("thought", ""),
+        "connections": verdict.synthesis_draft.get("connections", ""),
+        "source": verdict.synthesis_draft.get("source", ""),
     }
     try:
-        polished = evaluator.parse_polished_sonnet(
+        polished = evaluator.parse_polished_synthesis(
             local_client.generate_json(
                 evaluator.build_polish_prompt(draft_payload, polaris_ctx),
                 replace(model_cfg, max_output_tokens=3000),
@@ -50,20 +50,20 @@ def polish_single_sonnet(
     verdict.suggested_title = (
         polished["suggested_title"] or verdict.suggested_title
     )
-    verdict.sonnet_draft = {
+    verdict.synthesis_draft = {
         "summary": polished["summary"]
-        or verdict.sonnet_draft.get("summary", ""),
+        or verdict.synthesis_draft.get("summary", ""),
         "thought": polished["thought"]
-        or verdict.sonnet_draft.get("thought", ""),
+        or verdict.synthesis_draft.get("thought", ""),
         "connections": polished["connections"]
-        or verdict.sonnet_draft.get("connections", ""),
+        or verdict.synthesis_draft.get("connections", ""),
         "source": polished["source"]
-        or verdict.sonnet_draft.get("source", ""),
+        or verdict.synthesis_draft.get("source", ""),
     }
     return True
 
 
-def polish_sonnet_drafts(
+def polish_synthesis_drafts(
     cfg: dict,
     model_cfg: local_client.LocalModelConfig,
     *,
@@ -71,23 +71,23 @@ def polish_sonnet_drafts(
     project_dir: Path = runtime.PROJECT_DIR,
     result_file: Path = runtime.RESULT_FILE,
 ) -> str | None:
-    """strong_candidate Sonnet draft들을 polish하고 최종 JSON을 반환."""
+    """strong_candidate Synthesis draft들을 polish하고 최종 JSON을 반환."""
     raw = result_file.read_text(encoding="utf-8")
     verdicts = evaluator.parse_verdicts(raw)
     strong = [
         verdict
         for verdict in verdicts
-        if verdict.verdict == "strong_candidate" and verdict.sonnet_draft
+        if verdict.verdict == "strong_candidate" and verdict.synthesis_draft
     ]
     if not strong:
         return None
 
-    console.print(f"[cyan]Sonnet polish 실행:[/cyan] {len(strong)}개 초안")
+    console.print(f"[cyan]Synthesis polish 실행:[/cyan] {len(strong)}개 초안")
     _, _, polaris_dir, _, _ = runtime.resolve_paths(cfg, project_dir=project_dir)
     polaris_ctx = context.load_polaris(polaris_dir)
     applied = 0
     for verdict in strong:
-        if polish_single_sonnet(
+        if polish_single_synthesis(
             verdict, polaris_ctx, model_cfg, console=console
         ):
             applied += 1
@@ -98,18 +98,18 @@ def polish_sonnet_drafts(
     return polished_result
 
 
-def generate_single_sonnet_draft(
+def generate_single_synthesis_draft(
     verdict: evaluator.SessionVerdict,
-    session: parser.HaikuSession,
+    session: parser.CaptureSession,
     polaris_ctx: str,
     model_cfg: local_client.LocalModelConfig,
     *,
     console: Console,
 ) -> dict[str, str]:
     try:
-        return evaluator.parse_polished_sonnet(
+        return evaluator.parse_polished_synthesis(
             local_client.generate_json(
-                evaluator.build_sonnet_draft_prompt(
+                evaluator.build_synthesis_draft_prompt(
                     verdict,
                     session,
                     polaris_ctx,
@@ -121,9 +121,9 @@ def generate_single_sonnet_draft(
         console.print(
             f"[yellow]Compact draft fallback:[/yellow] {verdict.session_id} ({exc})"
         )
-        return evaluator.parse_polished_sonnet(
+        return evaluator.parse_polished_synthesis(
             local_client.generate_json(
-                evaluator.build_compact_sonnet_draft_prompt(
+                evaluator.build_compact_synthesis_draft_prompt(
                     verdict,
                     session,
                 ),
@@ -132,15 +132,15 @@ def generate_single_sonnet_draft(
         )
 
 
-def generate_sonnet_drafts(
+def generate_synthesis_drafts(
     verdicts: list[evaluator.SessionVerdict],
-    sessions: list[parser.HaikuSession],
+    sessions: list[parser.CaptureSession],
     polaris_ctx: str,
     model_cfg: local_client.LocalModelConfig,
     *,
     console: Console,
 ) -> tuple[list[evaluator.SessionVerdict], dict[str, str]]:
-    """strong_candidate에 대해서만 Sonnet 초안을 개별 생성한다."""
+    """strong_candidate에 대해서만 Synthesis 초안을 개별 생성한다."""
     session_map = {session.session_id: session for session in sessions}
     draft_cfg = replace(model_cfg, max_output_tokens=2200)
     failed_sessions: dict[str, str] = {}
@@ -152,10 +152,10 @@ def generate_sonnet_drafts(
         if session is None:
             continue
         console.print(
-            f"[cyan]Sonnet 초안 생성:[/cyan] {verdict.session_id}"
+            f"[cyan]Synthesis 초안 생성:[/cyan] {verdict.session_id}"
         )
         try:
-            draft = generate_single_sonnet_draft(
+            draft = generate_single_synthesis_draft(
                 verdict,
                 session,
                 polaris_ctx,
@@ -165,14 +165,14 @@ def generate_sonnet_drafts(
         except (json.JSONDecodeError, local_client.LocalModelError) as exc:
             failed_sessions[verdict.session_id] = str(exc)
             console.print(
-                f"[yellow]Sonnet 초안 보류:[/yellow] {verdict.session_id} ({exc})"
+                f"[yellow]Synthesis 초안 보류:[/yellow] {verdict.session_id} ({exc})"
             )
             continue
 
         verdict.suggested_title = (
             draft["suggested_title"] or verdict.suggested_title
         )
-        verdict.sonnet_draft = {
+        verdict.synthesis_draft = {
             "summary": draft["summary"],
             "thought": draft["thought"],
             "connections": draft["connections"],

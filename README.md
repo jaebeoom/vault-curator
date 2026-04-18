@@ -1,48 +1,48 @@
 # vault-curator
 
-Local-AI curation pipeline for promoting Obsidian `Haiku` sessions into `Sonnet` notes.
+Local-AI curation pipeline for promoting Obsidian `Capture` sessions into `Synthesis` notes.
 
 The project is designed around a simple idea:
 
-- `Haiku` contains raw AI conversation captures.
-- `Sonnet` contains refined, standalone thought fragments.
-- `vault-curator` reads new Haiku sessions, scores them, and optionally writes polished Sonnet drafts.
+- `Capture` contains raw AI conversation captures.
+- `Synthesis` contains refined, standalone thought fragments.
+- `vault-curator` reads new Capture sessions, scores them, and optionally writes polished Synthesis drafts.
 
 ## What It Does
 
 `vault-curator` currently provides:
 
-- Haiku parsing from daily markdown files
+- Capture parsing from daily markdown files
 - context-aware curation using the Polaris `README.md` entry contract
 - promotion decisions: `strong_candidate`, `borderline`, `skip`
 - adaptive batch splitting for long local-model runs
 - session-level incremental processing backed by persisted state
-- two-stage Sonnet generation: verdict first, draft generation only for `strong_candidate`
-- optional Sonnet polish step tuned to the user's writing voice
-- deterministic normalization for Sonnet `connections` and subject tags before Vault write
-- Sonnet admission gate that blocks structurally invalid drafts before Vault write
-- Haiku의 `<!-- source: ... -->` 주석과 Nathan의 짧은 판단/비유를 Sonnet framing과 `source` 필드에 우선 반영하도록 프롬프트 보강
-- soft duplicate warnings for titles that look similar to existing Sonnet notes
+- two-stage Synthesis generation: verdict first, draft generation only for `strong_candidate`
+- optional Synthesis polish step tuned to the user's writing voice
+- deterministic normalization for Synthesis `connections` and subject tags before Vault write
+- Synthesis admission gate that blocks structurally invalid drafts before Vault write
+- Capture의 `<!-- source: ... -->` 주석과 Nathan의 짧은 판단/비유를 Synthesis framing과 `source` 필드에 우선 반영하도록 프롬프트 보강
+- soft duplicate warnings for titles that look similar to existing Synthesis notes
 - deferred reporting when a strong candidate cannot yet be drafted safely
-- top-level `Vault/Sonnet/index.md` rebuilds from existing Sonnet notes
+- top-level `Vault/Synthesis/index.md` rebuilds from existing Synthesis notes
 - timestamped reports plus canonical by-date rollups
 
 ## Workflow
 
 The default flow is:
 
-1. Read new or changed files from `Vault/Haiku`
-2. Process one changed Haiku file at a time
+1. Read new or changed files from `Vault/Capture`
+2. Process one changed Capture file at a time
 3. Parse sessions
 4. Build curation prompts from `Vault/Polaris/AI/README.md` first, then the relevant Polaris context files
 5. Split large session sets into smaller batches for the local model
 6. Send verdict-only evaluation prompts to a local OpenAI-compatible endpoint
-7. For `strong_candidate` sessions, generate Sonnet drafts in separate follow-up calls
+7. For `strong_candidate` sessions, generate Synthesis drafts in separate follow-up calls
 8. Run a polish pass by default
-9. Run an admission gate before Sonnet write
+9. Run an admission gate before Synthesis write
 10. Write a review report, including soft duplicate warnings when relevant
-11. Write only admitted Sonnet notes into `Vault/Sonnet`
-12. Rebuild `Vault/Sonnet/index.md` from the current top-level Sonnet notes
+11. Write only admitted Synthesis notes into `Vault/Synthesis`
+12. Rebuild `Vault/Synthesis/index.md` from the current top-level Synthesis notes
 
 ## Architecture
 
@@ -52,10 +52,10 @@ The CLI is intentionally thin and delegates to focused modules:
 - `locking.py`: CLI-level lock handling
 - `preparation.py`: pending-session selection and prompt/meta generation
 - `evaluation_runner.py`: local-model verdict execution and batch splitting
-- `drafting.py`: Sonnet draft generation, compact fallback, and polish
-- `sonnet_gate.py`: deterministic Sonnet admission checks before write
-- `finalization.py`: reports, Sonnet note writes, and state updates
-- `sonnet_catalog.py`: top-level Sonnet parsing, connection normalization, and index generation
+- `drafting.py`: Synthesis draft generation, compact fallback, and polish
+- `synthesis_gate.py`: deterministic Synthesis admission checks before write
+- `finalization.py`: reports, Synthesis note writes, and state updates
+- `synthesis_catalog.py`: top-level Synthesis parsing, connection normalization, and index generation
 - `pipeline.py`: file-level orchestration
 
 ## Polaris Context Contract
@@ -97,7 +97,7 @@ Use `config.example.toml` as a starting point for a local `config.toml`.
 
 Important sections:
 
-- `[paths]`: where Haiku, Sonnet, Polaris, and reports live
+- `[paths]`: where Capture, Synthesis, Polaris, and reports live
 - `[evaluation]`: evaluation model and batch-size budget for local runs
 - `[local]`: default local endpoint/model fallback
 - `[automation]`: polling interval used by watch mode
@@ -150,7 +150,7 @@ PYTHONPATH=src uv run python -m vault_curator.cli doctor
 
 ## Admission Gate
 
-Before a generated Sonnet note is written into `Vault/Sonnet`, `vault-curator` runs a deterministic admission gate.
+Before a generated Synthesis note is written into `Vault/Synthesis`, `vault-curator` runs a deterministic admission gate.
 
 The gate currently blocks drafts when they have obvious structural problems such as:
 
@@ -160,22 +160,22 @@ The gate currently blocks drafts when they have obvious structural problems such
 - placeholder-style text such as `TBD`
 - `connections` left as a Python-style list string
 - `connections` made only of tags
-- title or filepath conflicts with existing Sonnet notes
+- title or filepath conflicts with existing Synthesis notes
 
 Blocked drafts are not written into the vault. Instead they are listed in the report under `Blocked by Admission Gate`, and they are not marked as completed in state so they can be revisited on a later run.
 
-The report can also surface soft duplicate warnings when a new strong candidate title looks similar to an existing top-level Sonnet note. These warnings do not block writes; they are meant for observation and threshold tuning.
+The report can also surface soft duplicate warnings when a new strong candidate title looks similar to an existing top-level Synthesis note. These warnings do not block writes; they are meant for observation and threshold tuning.
 
-## Sonnet Normalization
+## Synthesis Normalization
 
-Before write, `vault-curator` normalizes generated Sonnet drafts against the current top-level `Vault/Sonnet/*.md` catalog.
+Before write, `vault-curator` normalizes generated Synthesis drafts against the current top-level `Vault/Synthesis/*.md` catalog.
 
 - `connections` are rewritten into a stable line-by-line format
-- exact title matches to existing Sonnet notes are converted into `[[file_stem|title]]` wikilinks
+- exact title matches to existing Synthesis notes are converted into `[[file_stem|title]]` wikilinks
 - unresolved items remain plain text instead of creating broken links
-- writer-managed tags such as `#sonnet` and `#from/ai-session` are applied by the writer stage, while model-provided subject tags are filtered against the taxonomy
+- writer-managed tags such as `#stage/synthesis` and `#from/ai-session` are applied by the writer stage, while model-provided subject tags are filtered against the taxonomy
 
-After writes, `Vault/Sonnet/index.md` is rebuilt from the current top-level Sonnet notes so the index stays idempotent across reruns.
+After writes, `Vault/Synthesis/index.md` is rebuilt from the current top-level Synthesis notes so the index stays idempotent across reruns.
 
 ## Automation
 
@@ -259,7 +259,7 @@ Similarly:
 ## Current Design Tradeoffs
 
 - curation quality is good enough for daily use
-- Sonnet generation is strongest when polish is enabled
+- Synthesis generation is strongest when polish is enabled
 - local models are more reliable when verdicting, draft generation, and polish are separated
 - long sessions are compressed and batched conservatively, which improves stability at the cost of speed
 - automation favors eventual completion over immediate per-session execution

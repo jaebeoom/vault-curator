@@ -1,4 +1,4 @@
-"""Top-level Sonnet note parsing, normalization, and index generation."""
+"""Top-level Synthesis note parsing, normalization, and index generation."""
 
 from __future__ import annotations
 
@@ -14,10 +14,13 @@ from vault_curator.evaluator import SessionVerdict
 
 WRITER_MANAGED_TAGS = frozenset(
     {
-        "#sonnet",
+        "#stage/synthesis",
         "#from/ai-session",
-        "#haiku",
+        "#stage/capture",
         "#daily",
+        "#sonnet",
+        "#haiku",
+        "#opus",
     }
 )
 
@@ -33,7 +36,7 @@ _WIKILINK_RE = re.compile(r"^\[\[(.+?)\]\]$")
 
 
 @dataclass(frozen=True)
-class SonnetNote:
+class SynthesisNote:
     path: Path
     date: str
     file_stem: str
@@ -47,35 +50,35 @@ class SonnetNote:
 
 
 @dataclass(frozen=True)
-class SonnetLookup:
-    by_title: dict[str, SonnetNote]
-    by_stem: dict[str, SonnetNote]
+class SynthesisLookup:
+    by_title: dict[str, SynthesisNote]
+    by_stem: dict[str, SynthesisNote]
 
 
-def load_sonnet_notes(sonnet_dir: Path) -> list[SonnetNote]:
-    """Parse top-level Sonnet notes, excluding the generated index."""
-    notes: list[SonnetNote] = []
-    if not sonnet_dir.exists():
+def load_synthesis_notes(synthesis_dir: Path) -> list[SynthesisNote]:
+    """Parse top-level Synthesis notes, excluding the generated index."""
+    notes: list[SynthesisNote] = []
+    if not synthesis_dir.exists():
         return notes
 
-    for path in sorted(sonnet_dir.glob("*.md")):
+    for path in sorted(synthesis_dir.glob("*.md")):
         if path.name == "index.md":
             continue
         try:
             text = path.read_text(encoding="utf-8")
         except OSError:
             continue
-        notes.append(parse_sonnet_note(path, text))
+        notes.append(parse_synthesis_note(path, text))
     return notes
 
 
-def parse_sonnet_note(path: Path, text: str) -> SonnetNote:
-    """Parse a Sonnet note into structured fields."""
+def parse_synthesis_note(path: Path, text: str) -> SynthesisNote:
+    """Parse a Synthesis note into structured fields."""
     title_match = _TITLE_RE.search(text)
     summary_match = _SUMMARY_RE.search(text)
     session_match = _SESSION_MARKER_RE.search(text)
 
-    return SonnetNote(
+    return SynthesisNote(
         path=path,
         date=path.stem[:10],
         file_stem=path.stem,
@@ -89,46 +92,46 @@ def parse_sonnet_note(path: Path, text: str) -> SonnetNote:
     )
 
 
-def build_lookup(notes: Iterable[SonnetNote]) -> SonnetLookup:
+def build_lookup(notes: Iterable[SynthesisNote]) -> SynthesisLookup:
     """Build exact-match lookup tables by title and file stem."""
-    by_title: dict[str, SonnetNote] = {}
-    by_stem: dict[str, SonnetNote] = {}
+    by_title: dict[str, SynthesisNote] = {}
+    by_stem: dict[str, SynthesisNote] = {}
     for note in notes:
         if note.title and note.title not in by_title:
             by_title[note.title] = note
         by_stem[note.file_stem] = note
-    return SonnetLookup(by_title=by_title, by_stem=by_stem)
+    return SynthesisLookup(by_title=by_title, by_stem=by_stem)
 
 
 def normalize_verdicts(
     verdicts: list[SessionVerdict],
-    sonnet_dir: Path,
+    synthesis_dir: Path,
     allowed_subject_tags: set[str],
 ) -> list[SessionVerdict]:
-    """Normalize generated drafts against the existing top-level Sonnet catalog."""
-    lookup = build_lookup(load_sonnet_notes(sonnet_dir))
+    """Normalize generated drafts against the existing top-level Synthesis catalog."""
+    lookup = build_lookup(load_synthesis_notes(synthesis_dir))
     for verdict in verdicts:
         verdict.connected_themes = normalize_subject_tags(
             verdict.connected_themes,
             allowed_subject_tags,
         )
-        if verdict.verdict != "strong_candidate" or not verdict.sonnet_draft:
+        if verdict.verdict != "strong_candidate" or not verdict.synthesis_draft:
             continue
-        verdict.sonnet_draft["connections"] = render_connections(
+        verdict.synthesis_draft["connections"] = render_connections(
             normalize_connections_items(
-                verdict.sonnet_draft.get("connections", ""),
+                verdict.synthesis_draft.get("connections", ""),
                 lookup,
             )
         )
     return verdicts
 
 
-def normalize_existing_sonnet_notes(
-    sonnet_dir: Path,
+def normalize_existing_synthesis_notes(
+    synthesis_dir: Path,
     allowed_subject_tags: set[str],
 ) -> list[Path]:
-    """Rewrite existing top-level Sonnet notes with normalized connections and tags."""
-    notes = load_sonnet_notes(sonnet_dir)
+    """Rewrite existing top-level Synthesis notes with normalized connections and tags."""
+    notes = load_synthesis_notes(synthesis_dir)
     lookup = build_lookup(notes)
     changed: list[Path] = []
 
@@ -140,7 +143,7 @@ def normalize_existing_sonnet_notes(
         normalized_connections = render_connections(
             normalize_connections_items(note.connections, lookup)
         )
-        rendered = render_sonnet_note(
+        rendered = render_synthesis_note(
             session_id=note.session_id,
             title=note.title,
             summary=note.summary,
@@ -163,13 +166,13 @@ def normalize_existing_sonnet_notes(
 
 
 def write_index(
-    sonnet_dir: Path,
+    synthesis_dir: Path,
     *,
     generated_at: datetime | None = None,
 ) -> Path:
-    """Rebuild Vault/Sonnet/index.md from the current top-level Sonnet notes."""
-    notes = load_sonnet_notes(sonnet_dir)
-    index_path = sonnet_dir / "index.md"
+    """Rebuild Vault/Synthesis/index.md from the current top-level Synthesis notes."""
+    notes = load_synthesis_notes(synthesis_dir)
+    index_path = synthesis_dir / "index.md"
     generated_at = generated_at or datetime.now()
     index_path.write_text(
         build_index_markdown(notes, generated_at=generated_at),
@@ -179,15 +182,15 @@ def write_index(
 
 
 def build_index_markdown(
-    notes: list[SonnetNote],
+    notes: list[SynthesisNote],
     *,
     generated_at: datetime | None = None,
 ) -> str:
-    """Build the markdown table for Vault/Sonnet/index.md."""
+    """Build the markdown table for Vault/Synthesis/index.md."""
     generated_at = generated_at or datetime.now()
     lines = [
-        "# Sonnet Index",
-        "> top-level `Vault/Sonnet/*.md` 기준으로 재생성됨.",
+        "# Synthesis Index",
+        "> top-level `Vault/Synthesis/*.md` 기준으로 재생성됨.",
         f"> 마지막 업데이트: {generated_at.strftime('%Y-%m-%d')}",
         "",
         "| 날짜 | 제목 | 파일 | 한 줄 요약 | 태그 | session_id |",
@@ -211,7 +214,7 @@ def build_index_markdown(
     return "\n".join(lines) + "\n"
 
 
-def render_sonnet_note(
+def render_synthesis_note(
     *,
     session_id: str | None,
     title: str,
@@ -221,9 +224,9 @@ def render_sonnet_note(
     source: str,
     subject_tags: Iterable[str],
 ) -> str:
-    """Render a Sonnet note with canonical section and tag ordering."""
+    """Render a Synthesis note with canonical section and tag ordering."""
     tags = normalize_subject_tags(subject_tags, set())
-    tag_line = "#sonnet #from/ai-session"
+    tag_line = "#stage/synthesis #from/ai-session"
     if tags:
         tag_line = f"{tag_line} {' '.join(tags)}"
 
@@ -327,7 +330,7 @@ def parse_connection_candidates(raw: str) -> list[str]:
 
 def normalize_connections_items(
     raw: str,
-    lookup: SonnetLookup,
+    lookup: SynthesisLookup,
 ) -> list[str]:
     """Normalize connections into canonical plain-text lines or file-stem wikilinks."""
     normalized: list[str] = []
@@ -448,7 +451,7 @@ def _cleanup_connection_token(token: str) -> str:
 
 def _normalize_connection_candidate(
     candidate: str,
-    lookup: SonnetLookup,
+    lookup: SynthesisLookup,
 ) -> str | None:
     item = candidate.strip()
     if not item or _is_tag_item(item):
@@ -469,7 +472,7 @@ def _normalize_connection_candidate(
     return _plain_connection_text(item)
 
 
-def _resolve_existing_note(item: str, lookup: SonnetLookup) -> SonnetNote | None:
+def _resolve_existing_note(item: str, lookup: SynthesisLookup) -> SynthesisNote | None:
     candidate = _plain_connection_text(item)
     if not candidate:
         return None

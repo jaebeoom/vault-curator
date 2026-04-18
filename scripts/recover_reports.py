@@ -20,6 +20,7 @@ REPORT_ENTRY_RE = re.compile(
 )
 SUMMARY_RE = re.compile(r"^>\s+한 줄 요약:\s+(.*)$", re.MULTILINE)
 TAG_RE = re.compile(r"(#[^\s#]+)")
+WRITER_MANAGED_TAGS = {"#stage/synthesis", "#sonnet", "#from/ai-session"}
 
 
 @dataclass
@@ -34,32 +35,42 @@ class RecoveredNote:
 def resolve_project_paths(
     *,
     root: Path = ROOT,
-    sonnet_dir_override: str | None = None,
+    synthesis_dir_override: str | None = None,
 ) -> tuple[Path, Path]:
     reports_dir = root / "reports"
-    if sonnet_dir_override:
-        return reports_dir, Path(sonnet_dir_override).expanduser()
+    if synthesis_dir_override:
+        return reports_dir, Path(synthesis_dir_override).expanduser()
 
     config_path = root / "config.toml"
     if not config_path.exists():
         raise SystemExit(
-            "config.toml not found. Pass --sonnet-dir or create a local config.toml."
+            "config.toml not found. Pass --synthesis-dir or create a local config.toml."
         )
 
     cfg = tomllib.loads(config_path.read_text(encoding="utf-8"))
     paths = cfg.get("paths", {})
     vault_root_value = paths.get("vault_root")
-    sonnet_dir_value = paths.get("sonnet_dir")
-    if not vault_root_value or not sonnet_dir_value:
+    synthesis_dir_value = paths.get("synthesis_dir", paths.get("sonnet_dir"))
+    if not vault_root_value or not synthesis_dir_value:
         raise SystemExit(
-            "config.toml must define [paths].vault_root and [paths].sonnet_dir."
+            "config.toml must define [paths].vault_root and [paths].synthesis_dir."
         )
 
     vault_root = Path(vault_root_value).expanduser()
-    sonnet_dir = Path(sonnet_dir_value).expanduser()
-    if not sonnet_dir.is_absolute():
-        sonnet_dir = vault_root / sonnet_dir
-    return reports_dir, sonnet_dir
+    configured_synthesis_dir = Path(synthesis_dir_value).expanduser()
+    synthesis_dir = (
+        configured_synthesis_dir
+        if configured_synthesis_dir.is_absolute()
+        else vault_root / configured_synthesis_dir
+    )
+    migrated_default = vault_root / "Synthesis"
+    if (
+        synthesis_dir_value == "Sonnet"
+        and not synthesis_dir.exists()
+        and migrated_default.exists()
+    ):
+        synthesis_dir = migrated_default
+    return reports_dir, synthesis_dir
 
 
 def extract_title(text: str, fallback: str) -> str:
@@ -76,8 +87,11 @@ def extract_summary(text: str) -> str:
 
 def extract_themes(text: str) -> list[str]:
     for line in reversed(text.splitlines()):
-        if line.startswith("#sonnet "):
-            return [tag for tag in TAG_RE.findall(line) if tag != "#sonnet"]
+        if line.startswith("#stage/synthesis ") or line.startswith("#sonnet "):
+            return [
+                tag for tag in TAG_RE.findall(line)
+                if tag not in WRITER_MANAGED_TAGS
+            ]
     return []
 
 
@@ -92,12 +106,12 @@ def covered_session_ids(reports_dir: Path) -> set[str]:
 def collect_recoverable_notes(
     date: str,
     reports_dir: Path,
-    sonnet_dir: Path,
+    synthesis_dir: Path,
 ) -> list[RecoveredNote]:
     covered = covered_session_ids(reports_dir)
     recovered: list[RecoveredNote] = []
 
-    for path in sorted(sonnet_dir.glob("*.md")):
+    for path in sorted(synthesis_dir.glob("*.md")):
         text = path.read_text(encoding="utf-8")
         marker = SESSION_MARKER_RE.search(text)
         if marker is None:
@@ -137,8 +151,8 @@ def unique_report_path(reports_dir: Path, date: str) -> Path:
 
 def build_report(date: str, notes: list[RecoveredNote]) -> str:
     lines: list[str] = []
-    lines.append(f"# Haiku Review (Recovered): {date}\n")
-    lines.append("> Recovery basis: existing Sonnet notes")
+    lines.append(f"# Capture Review (Recovered): {date}\n")
+    lines.append("> Recovery basis: existing Synthesis notes")
     lines.append("> Original evaluator counts were not retained")
     lines.append("> Sessions evaluated: unknown")
     lines.append(f"> Recovered strong candidates: {len(notes)}")
@@ -146,14 +160,14 @@ def build_report(date: str, notes: list[RecoveredNote]) -> str:
     lines.append("> Skipped: unknown\n")
 
     if notes:
-        lines.append("## 복구된 Sonnet 승격 후보\n")
+        lines.append("## 복구된 Synthesis 승격 후보\n")
         for index, note in enumerate(notes, 1):
             theme_text = " ".join(note.themes) if note.themes else "(not retained)"
             summary = note.summary if note.summary else "(summary not retained)"
             lines.append(f"### {index}. {note.title} ({note.session_id})")
             lines.append(f"- **핵심:** {summary}")
             lines.append(
-                "- **복구 근거:** 기존 Sonnet 노트가 보존되어 있어 제목/요약/테마를 재구성함. "
+                "- **복구 근거:** 기존 Synthesis 노트가 보존되어 있어 제목/요약/테마를 재구성함. "
                 "원본 evaluator reasoning은 보존되지 않아 그대로 복원할 수 없음."
             )
             lines.append(f"- **테마:** {theme_text}")
@@ -162,7 +176,7 @@ def build_report(date: str, notes: list[RecoveredNote]) -> str:
     else:
         lines.append("## 복구 결과\n")
         lines.append(
-            "- 이 날짜에 대해 보존된 Sonnet 노트가 없어 strong candidate 리포트를 복구할 수 없었습니다.\n"
+            "- 이 날짜에 대해 보존된 Synthesis 노트가 없어 strong candidate 리포트를 복구할 수 없었습니다.\n"
         )
 
     return "\n".join(lines)
@@ -172,16 +186,18 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--date", required=True, help="Recover a report for YYYY-MM-DD")
     parser.add_argument(
+        "--synthesis-dir",
         "--sonnet-dir",
-        help="Override Sonnet directory instead of reading config.toml",
+        dest="synthesis_dir",
+        help="Override Synthesis directory instead of reading config.toml",
     )
     args = parser.parse_args()
 
-    reports_dir, sonnet_dir = resolve_project_paths(
-        sonnet_dir_override=args.sonnet_dir
+    reports_dir, synthesis_dir = resolve_project_paths(
+        synthesis_dir_override=args.synthesis_dir
     )
     reports_dir.mkdir(parents=True, exist_ok=True)
-    notes = collect_recoverable_notes(args.date, reports_dir, sonnet_dir)
+    notes = collect_recoverable_notes(args.date, reports_dir, synthesis_dir)
     report_path = unique_report_path(reports_dir, args.date)
     report_path.write_text(build_report(args.date, notes), encoding="utf-8")
     print(report_path)

@@ -20,6 +20,7 @@ REPORT_ENTRY_RE = re.compile(
     r"^###\s+\d+\.\s+(.*?)\s+\((20\d{2}-\d{2}-\d{2}_\d{2}:\d{2})\)$",
     re.MULTILINE,
 )
+SESSION_DATE_RE = re.compile(r"(20\d{2}-\d{2}-\d{2})")
 MANUAL_NOTE_SESSION_MAP = {
     "ABF_독점_체제의_균열과_글래스_인터포저의_기술적_탈출구": {"2026-04-06_18:14"},
     "기호와_물리_사이의_간극:_xAI가_직면한_멀티모달_정렬의_과제": {"2026-04-06_08:26"},
@@ -42,33 +43,43 @@ class NoteRecord:
 def resolve_project_paths(
     *,
     root: Path = ROOT,
-    sonnet_dir_override: str | None = None,
+    synthesis_dir_override: str | None = None,
 ) -> tuple[Path, Path, Path]:
     reports_dir = root / "reports"
     state_path = root / ".curator-state.json"
-    if sonnet_dir_override:
-        return reports_dir, state_path, Path(sonnet_dir_override).expanduser()
+    if synthesis_dir_override:
+        return reports_dir, state_path, Path(synthesis_dir_override).expanduser()
 
     config_path = root / "config.toml"
     if not config_path.exists():
         raise SystemExit(
-            "config.toml not found. Pass --sonnet-dir or create a local config.toml."
+            "config.toml not found. Pass --synthesis-dir or create a local config.toml."
         )
 
     cfg = tomllib.loads(config_path.read_text(encoding="utf-8"))
     paths = cfg.get("paths", {})
     vault_root_value = paths.get("vault_root")
-    sonnet_dir_value = paths.get("sonnet_dir")
-    if not vault_root_value or not sonnet_dir_value:
+    synthesis_dir_value = paths.get("synthesis_dir", paths.get("sonnet_dir"))
+    if not vault_root_value or not synthesis_dir_value:
         raise SystemExit(
-            "config.toml must define [paths].vault_root and [paths].sonnet_dir."
+            "config.toml must define [paths].vault_root and [paths].synthesis_dir."
         )
 
     vault_root = Path(vault_root_value).expanduser()
-    sonnet_dir = Path(sonnet_dir_value).expanduser()
-    if not sonnet_dir.is_absolute():
-        sonnet_dir = vault_root / sonnet_dir
-    return reports_dir, state_path, sonnet_dir
+    configured_synthesis_dir = Path(synthesis_dir_value).expanduser()
+    synthesis_dir = (
+        configured_synthesis_dir
+        if configured_synthesis_dir.is_absolute()
+        else vault_root / configured_synthesis_dir
+    )
+    migrated_default = vault_root / "Synthesis"
+    if (
+        synthesis_dir_value == "Sonnet"
+        and not synthesis_dir.exists()
+        and migrated_default.exists()
+    ):
+        synthesis_dir = migrated_default
+    return reports_dir, state_path, synthesis_dir
 
 
 def normalize_title(title: str) -> str:
@@ -102,11 +113,11 @@ def load_report_title_map(reports_dir: Path) -> dict[str, set[str]]:
 
 
 def scan_notes(
-    sonnet_dir: Path,
+    synthesis_dir: Path,
     title_map: dict[str, set[str]],
 ) -> list[NoteRecord]:
     records: list[NoteRecord] = []
-    for path in sorted(sonnet_dir.glob("*.md")):
+    for path in sorted(synthesis_dir.glob("*.md")):
         text = path.read_text(encoding="utf-8")
         title = extract_title(text, path.stem.replace("_", " "))
         session_ids = set(SESSION_ID_RE.findall(text))
@@ -221,14 +232,26 @@ def write_history_audit(
 
 def compute_state_without_report(reports_dir: Path, state_path: Path) -> list[str]:
     state = json.loads(state_path.read_text(encoding="utf-8"))
-    state_dates = {filename.removesuffix(".md") for filename in state}
+    if isinstance(state, dict) and isinstance(state.get("sessions"), dict):
+        state_session_ids = [str(session_id) for session_id in state["sessions"]]
+    elif isinstance(state, dict):
+        state_session_ids = [str(filename).removesuffix(".md") for filename in state]
+    else:
+        state_session_ids = []
+
+    state_dates = {
+        match.group(1)
+        for session_id in state_session_ids
+        if (match := SESSION_DATE_RE.search(session_id))
+    }
     retained_report_dates = {
-        session_id.split("_")[0] for _, session_id in REPORT_ENTRY_RE.findall(
+        match.group(1) for _, session_id in REPORT_ENTRY_RE.findall(
             "\n".join(
                 path.read_text(encoding="utf-8")
                 for path in sorted(reports_dir.glob("*.md"))
             )
         )
+        if (match := SESSION_DATE_RE.search(session_id))
     }
     return sorted(state_dates - retained_report_dates)
 
@@ -237,16 +260,18 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--apply", action="store_true")
     parser.add_argument(
+        "--synthesis-dir",
         "--sonnet-dir",
-        help="Override Sonnet directory instead of reading config.toml",
+        dest="synthesis_dir",
+        help="Override Synthesis directory instead of reading config.toml",
     )
     args = parser.parse_args()
 
-    reports_dir, state_path, sonnet_dir = resolve_project_paths(
-        sonnet_dir_override=args.sonnet_dir
+    reports_dir, state_path, synthesis_dir = resolve_project_paths(
+        synthesis_dir_override=args.synthesis_dir
     )
     title_map = load_report_title_map(reports_dir)
-    records = scan_notes(sonnet_dir, title_map)
+    records = scan_notes(synthesis_dir, title_map)
     matched_records = [record for record in records if len(record.session_ids) == 1]
     unmatched_records = [record for record in records if len(record.session_ids) != 1]
 
@@ -261,7 +286,7 @@ def main() -> None:
         if len(group) > 1
     }
 
-    archive_dir = sonnet_dir / "_history_archive" / "vault-curator-dedup-2026-04-12"
+    archive_dir = synthesis_dir / "_history_archive" / "vault-curator-dedup-2026-04-12"
     archived: list[tuple[Path, Path]] = []
     renamed: list[tuple[Path, Path]] = []
 
@@ -295,7 +320,7 @@ def main() -> None:
                 archive_target = unique_archive_path(archive_dir, record.path.name)
                 archive_target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.move(str(record.path), str(archive_target))
-                archived.append((record.path, archive_target.relative_to(sonnet_dir)))
+                archived.append((record.path, archive_target.relative_to(synthesis_dir)))
 
     state_without_report = compute_state_without_report(reports_dir, state_path)
     if args.apply:

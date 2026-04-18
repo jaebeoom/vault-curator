@@ -12,25 +12,25 @@ from vault_curator import context, evaluator, parser, runtime, state
 
 
 def select_pending_inputs(
-    haiku_dir: Path,
+    capture_dir: Path,
     since: str | None,
     force: bool,
     *,
     console: Console,
     project_dir: Path = runtime.PROJECT_DIR,
-) -> list[tuple[Path, list[parser.HaikuSession]]]:
-    files = sorted(haiku_dir.glob("*.md"))
+) -> list[tuple[Path, list[parser.CaptureSession]]]:
+    files = sorted(capture_dir.glob("*.md"))
     if since:
         files = [f for f in files if f.stem >= since]
 
     if not files:
-        console.print("[yellow]평가할 Haiku 파일이 없습니다.[/yellow]")
+        console.print("[yellow]평가할 Capture 파일이 없습니다.[/yellow]")
         raise typer.Exit(0)
 
     session_state = (
-        {} if force else state.load_state(project_dir, haiku_dir=haiku_dir)
+        {} if force else state.load_state(project_dir, capture_dir=capture_dir)
     )
-    pending_inputs: list[tuple[Path, list[parser.HaikuSession]]] = []
+    pending_inputs: list[tuple[Path, list[parser.CaptureSession]]] = []
 
     for file in files:
         sessions = parser.parse_file(file)
@@ -61,10 +61,10 @@ def prepare_prompt(
     project_dir: Path = runtime.PROJECT_DIR,
     prompt_file: Path = runtime.PROMPT_FILE,
     meta_file: Path = runtime.META_FILE,
-) -> tuple[str, list[list[parser.HaikuSession]]]:
-    haiku_dir, _, _, _, _ = runtime.resolve_paths(cfg, project_dir=project_dir)
+) -> tuple[str, list[list[parser.CaptureSession]]]:
+    capture_dir, _, _, _, _ = runtime.resolve_paths(cfg, project_dir=project_dir)
     pending_inputs = select_pending_inputs(
-        haiku_dir,
+        capture_dir,
         since,
         force,
         console=console,
@@ -82,16 +82,16 @@ def prepare_prompt(
 
 def prepare_prompt_for_inputs(
     cfg: dict,
-    pending_inputs: list[tuple[Path, list[parser.HaikuSession]]],
+    pending_inputs: list[tuple[Path, list[parser.CaptureSession]]],
     *,
     console: Console,
     project_dir: Path = runtime.PROJECT_DIR,
     prompt_file: Path = runtime.PROMPT_FILE,
     meta_file: Path = runtime.META_FILE,
-) -> tuple[str, list[list[parser.HaikuSession]]]:
+) -> tuple[str, list[list[parser.CaptureSession]]]:
     _, _, polaris_dir, _, _ = runtime.resolve_paths(cfg, project_dir=project_dir)
 
-    all_sessions: list[parser.HaikuSession] = []
+    all_sessions: list[parser.CaptureSession] = []
     files: list[Path] = []
     for file, sessions in pending_inputs:
         files.append(file)

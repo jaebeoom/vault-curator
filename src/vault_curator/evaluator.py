@@ -1,4 +1,4 @@
-"""Haiku 세션 평가 — 프롬프트 준비 및 결과 파싱.
+"""Capture 세션 평가 — 프롬프트 준비 및 결과 파싱.
 
 API 호출은 하지 않음. Claude Code가 평가를 직접 수행하고,
 그 결과 JSON을 이 모듈이 파싱하는 구조.
@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from vault_curator.parser import HaikuSession
+from vault_curator.parser import CaptureSession
 
 
 @dataclass
@@ -22,7 +22,7 @@ class SessionVerdict:
     core_idea: str = ""
     suggested_title: str = ""
     connected_themes: list[str] = field(default_factory=list)
-    sonnet_draft: dict[str, str] | None = None
+    synthesis_draft: dict[str, str] | None = None
 
 
 class VerdictCoverageError(RuntimeError):
@@ -60,8 +60,8 @@ def _normalize_connected_themes(value: Any) -> list[str]:
     return []
 
 
-def _normalize_sonnet_draft(value: Any) -> dict[str, str] | None:
-    """모델 응답의 Sonnet draft 구조를 안전하게 정규화."""
+def _normalize_synthesis_draft(value: Any) -> dict[str, str] | None:
+    """모델 응답의 Synthesis draft 구조를 안전하게 정규화."""
     if not isinstance(value, dict):
         return None
 
@@ -74,12 +74,12 @@ def _normalize_sonnet_draft(value: Any) -> dict[str, str] | None:
 
 
 EVALUATION_PROMPT = """\
-당신은 Obsidian Vault의 Haiku → Sonnet 승격을 판단하는 1차 필터입니다.
+당신은 Obsidian Vault의 Capture → Synthesis 승격을 판단하는 1차 필터입니다.
 
 ## Vault 구조
-- Haiku: 텔레그램 봇이 자동 저장하는 AI 대화 세션 (날것)
-- Sonnet: 정제된 사고 조각 (하나의 노트 = 하나의 독립적 생각)
-- Opus: Sonnet 조각들을 엮어 만든 완성 에세이
+- Capture: 텔레그램 봇이 자동 저장하는 AI 대화 세션 (날것)
+- Synthesis: 정제된 사고 조각 (하나의 노트 = 하나의 독립적 생각)
+- Essays: Synthesis 조각들을 엮어 만든 완성 에세이
 
 ## 유저 컨텍스트
 {polaris_context}
@@ -109,7 +109,7 @@ EVALUATION_PROMPT = """\
 - strong_candidate는 보수적으로 고르되, 유저의 독자 프레임이 텍스트에서 명시적으로 복원될 때만 승격하세요.
 
 ## 판정 기준
-- **strong_candidate**: 3가지 기준 모두 충족. Sonnet 초안을 생성할 것.
+- **strong_candidate**: 3가지 기준 모두 충족. Synthesis 초안을 생성할 것.
 - **borderline**: 1~2가지만 충족. 리포트에 언급하되 승격하지 않음.
 - **skip**: 즉시 탈락 패턴 또는 기준 미충족.
 
@@ -126,7 +126,7 @@ EVALUATION_PROMPT = """\
       "verdict": "strong_candidate | borderline | skip",
       "reasoning": "판정 이유 (2~3문장, 한국어)",
       "core_idea": "핵심 아이디어 한 줄 (strong_candidate만)",
-      "suggested_title": "제안 Sonnet 제목 (strong_candidate만)",
+      "suggested_title": "제안 Synthesis 제목 (strong_candidate만)",
       "connected_themes": ["#topic/tag1", "#topic/tag2"]
     }}
   ]
@@ -135,23 +135,23 @@ EVALUATION_PROMPT = """\
 """
 
 
-SONNET_DRAFT_PROMPT = """\
-당신은 Obsidian Vault의 Haiku 세션에서 Sonnet 초안을 뽑아내는 작성 보조입니다.
+SYNTHESIS_DRAFT_PROMPT = """\
+당신은 Obsidian Vault의 Capture 세션에서 Synthesis 초안을 뽑아내는 작성 보조입니다.
 
 ## 유저 컨텍스트
 {polaris_context}
 
 ## 작업 목표
 - 아래 세션은 이미 strong_candidate로 판정되었습니다.
-- 이 세션을 바탕으로 Vault/Sonnet에 들어갈 **정제된 사고 조각** 초안을 JSON으로 작성하세요.
+- 이 세션을 바탕으로 Vault/Synthesis에 들어갈 **정제된 사고 조각** 초안을 JSON으로 작성하세요.
 - 대화 요약이 아니라 유저 자신의 주장과 프레임을 전면에 놓으세요.
 
-## Sonnet 초안 작성 규칙
+## Synthesis 초안 작성 규칙
 - 유저의 Writing Voice를 따르세요. 특히:
   - 자기 지칭은 가능하면 **"필자"**
   - 학술적이되 딱딱하지 않은 문어체
   - 통념 제시 → 한계 지적 → 대안 프레임 제시 → 사례의 흐름
-- `**나**` 블록, 특히 Nathan의 짧은 평가/비유/결론을 먼저 찾고 Sonnet의 핵심 framing으로 끌어올리세요.
+- `**나**` 블록, 특히 Nathan의 짧은 평가/비유/결론을 먼저 찾고 Synthesis의 핵심 framing으로 끌어올리세요.
 - `**AI**:` 분석은 Nathan 판단의 근거 보강에만 쓰고, Nathan의 framing을 대체하지 마세요.
 - 세션에 `<!-- source: ... -->`가 있으면 그 URL 또는 출처 단서를 `source` 필드에 반영하세요.
 - Nathan의 원문 표현이 짧거나 거칠어도 의미를 과하게 미화하거나 다른 주장으로 바꾸지 마세요.
@@ -163,7 +163,7 @@ SONNET_DRAFT_PROMPT = """\
 - `connections`는 1~3개만 작성
 - Python list(`['a', 'b']`)를 쓰지 말 것
 - 태그(`#tech/ai`)를 쓰지 말 것
-- 정확히 매칭되는 기존 Sonnet 노트 제목일 때만 note reference로 쓰고, 아니면 plain text 개념으로 둘 것
+- 정확히 매칭되는 기존 Synthesis 노트 제목일 때만 note reference로 쓰고, 아니면 plain text 개념으로 둘 것
 - 새로운 사실이나 근거를 임의로 추가하지 마세요.
 
 ## 판정 메모
@@ -181,7 +181,7 @@ SONNET_DRAFT_PROMPT = """\
 
 ```json
 {{
-  "title": "제안 Sonnet 제목",
+  "title": "제안 Synthesis 제목",
   "summary": "한 줄 요약",
   "thought": "정제된 생각 본문 4문장",
   "connections": "연결되는 개념 1~3개",
@@ -191,11 +191,11 @@ SONNET_DRAFT_PROMPT = """\
 """
 
 
-COMPACT_SONNET_DRAFT_PROMPT = """\
-당신은 Obsidian Vault용 Sonnet 초안을 짧고 정확하게 쓰는 작성 보조입니다.
+COMPACT_SYNTHESIS_DRAFT_PROMPT = """\
+당신은 Obsidian Vault용 Synthesis 초안을 짧고 정확하게 쓰는 작성 보조입니다.
 
 ## 작업 목표
-- 아래 strong_candidate 세션에 대해 Sonnet 초안을 JSON으로 작성하세요.
+- 아래 strong_candidate 세션에 대해 Synthesis 초안을 JSON으로 작성하세요.
 - 대화 요약이 아니라 유저의 주장과 프레임을 전면에 두세요.
 - JSON 외의 텍스트는 절대 출력하지 마세요.
 
@@ -204,7 +204,7 @@ COMPACT_SONNET_DRAFT_PROMPT = """\
 - 자기 지칭은 가능하면 "필자"
 - 새로운 사실을 추가하지 말 것
 - `session_id`는 참고용이며 그대로 유지
-- `**나**` 블록의 짧은 평가/비유/결론을 Sonnet의 핵심 framing으로 우선 반영할 것
+- `**나**` 블록의 짧은 평가/비유/결론을 Synthesis의 핵심 framing으로 우선 반영할 것
 - `**AI**:` 내용은 Nathan 판단의 보조 근거로만 사용할 것
 - `<!-- source: ... -->`가 보이면 `source` 필드에 반영할 것
 - Nathan 원문 표현의 의미를 과장하거나 다른 주장으로 치환하지 말 것
@@ -222,7 +222,7 @@ COMPACT_SONNET_DRAFT_PROMPT = """\
 ## 출력 형식
 ```json
 {{
-  "title": "제안 Sonnet 제목",
+  "title": "제안 Synthesis 제목",
   "summary": "한 줄 요약",
   "thought": "정제된 생각 본문 4문장",
   "connections": "연결되는 개념 1~3개",
@@ -232,8 +232,8 @@ COMPACT_SONNET_DRAFT_PROMPT = """\
 """
 
 
-SONNET_POLISH_PROMPT = """\
-당신은 Obsidian Vault의 Sonnet 초안을 유저의 Writing Voice에 맞춰 다듬는 편집자입니다.
+SYNTHESIS_POLISH_PROMPT = """\
+당신은 Obsidian Vault의 Synthesis 초안을 유저의 Writing Voice에 맞춰 다듬는 편집자입니다.
 
 ## 유저 컨텍스트
 {polaris_context}
@@ -258,7 +258,7 @@ SONNET_POLISH_PROMPT = """\
 - `**AI**`의 설명이 있더라도 Nathan의 판단을 덮어쓰지 마세요.
 - 초안의 `source`가 `<!-- source: ... -->` 같은 세션 출처를 반영하고 있다면 그 단서를 유지하세요.
 
-## 원본 Sonnet 초안
+## 원본 Synthesis 초안
 ```json
 {draft_json}
 ```
@@ -279,7 +279,7 @@ SONNET_POLISH_PROMPT = """\
 
 
 def build_prompt(
-    sessions: list[HaikuSession], polaris_context: str
+    sessions: list[CaptureSession], polaris_context: str
 ) -> str:
     """평가 프롬프트 전체를 조합해 반환. Claude Code가 이걸 읽고 평가."""
     system = EVALUATION_PROMPT.format(polaris_context=polaris_context)
@@ -315,7 +315,8 @@ def _compress_session_text(text: str) -> str:
             while index < len(lines):
                 next_stripped = lines[index].strip()
                 if (
-                    next_stripped.startswith("## AI 세션")
+                    next_stripped.startswith("## ")
+                    or next_stripped.startswith("### 내 생각")
                     or next_stripped.startswith("**나**")
                     or next_stripped.startswith("**AI**:")
                 ):
@@ -324,15 +325,32 @@ def _compress_session_text(text: str) -> str:
                 index += 1
             compressed.extend(user_block)
             continue
+        if stripped.startswith("### 내 생각"):
+            thought_block = [line]
+            index += 1
+            while index < len(lines):
+                next_stripped = lines[index].strip()
+                if (
+                    next_stripped.startswith("## ")
+                    or next_stripped.startswith("### ")
+                    or next_stripped.startswith("**나**")
+                    or next_stripped.startswith("**AI**:")
+                ):
+                    break
+                thought_block.append(lines[index])
+                index += 1
+            compressed.extend(thought_block)
+            continue
         if stripped.startswith("**AI**:"):
             ai_block = [line]
             index += 1
             while index < len(lines):
                 next_stripped = lines[index].strip()
                 if (
-                    next_stripped.startswith("## AI 세션")
+                    next_stripped.startswith("## ")
                     or next_stripped.startswith("**나**")
                     or next_stripped.startswith("**AI**:")
+                    or next_stripped.startswith("### 내 생각")
                 ):
                     break
                 ai_block.append(lines[index])
@@ -385,10 +403,10 @@ def _estimate_token_count(text: str) -> int:
 
 
 def split_session_batches(
-    sessions: list[HaikuSession],
+    sessions: list[CaptureSession],
     polaris_context: str,
     max_tokens_per_batch: int,
-) -> list[list[HaikuSession]]:
+) -> list[list[CaptureSession]]:
     """평가 세션을 컨텍스트 한도에 맞게 여러 배치로 나눈다."""
     if not sessions:
         return []
@@ -398,8 +416,8 @@ def split_session_batches(
     header = f"{system}\n---\n\n# 평가 대상 세션\n"
     base_tokens = _estimate_token_count(header)
 
-    batches: list[list[HaikuSession]] = []
-    current_batch: list[HaikuSession] = []
+    batches: list[list[CaptureSession]] = []
+    current_batch: list[CaptureSession] = []
     current_tokens = base_tokens
 
     for index, session in enumerate(sessions, 1):
@@ -443,8 +461,8 @@ def parse_verdicts(text: str) -> list[SessionVerdict]:
                 connected_themes=_normalize_connected_themes(
                     item.get("connected_themes", [])
                 ),
-                sonnet_draft=_normalize_sonnet_draft(
-                    item.get("sonnet_draft")
+                synthesis_draft=_normalize_synthesis_draft(
+                    item.get("synthesis_draft", item.get("sonnet_draft"))
                 ),
             )
         )
@@ -491,14 +509,14 @@ def build_polish_prompt(
     draft: dict[str, str],
     polaris_context: str,
 ) -> str:
-    """Sonnet 초안을 문체 중심으로 다듬는 프롬프트."""
-    return SONNET_POLISH_PROMPT.format(
+    """Synthesis 초안을 문체 중심으로 다듬는 프롬프트."""
+    return SYNTHESIS_POLISH_PROMPT.format(
         polaris_context=polaris_context,
         draft_json=json.dumps(draft, ensure_ascii=False, indent=2),
     )
 
 
-def parse_polished_sonnet(text: str) -> dict[str, str]:
+def parse_polished_synthesis(text: str) -> dict[str, str]:
     """Polish 단계의 JSON 응답을 파싱."""
     data: dict[str, Any] = json.loads(_extract_json_text(text))
     return {
@@ -510,13 +528,13 @@ def parse_polished_sonnet(text: str) -> dict[str, str]:
     }
 
 
-def build_sonnet_draft_prompt(
+def build_synthesis_draft_prompt(
     verdict: SessionVerdict,
-    session: HaikuSession,
+    session: CaptureSession,
     polaris_context: str,
 ) -> str:
-    """strong_candidate 세션에서 Sonnet 초안을 생성하는 프롬프트."""
-    return SONNET_DRAFT_PROMPT.format(
+    """strong_candidate 세션에서 Synthesis 초안을 생성하는 프롬프트."""
+    return SYNTHESIS_DRAFT_PROMPT.format(
         polaris_context=polaris_context,
         session_id=verdict.session_id,
         suggested_title=verdict.suggested_title,
@@ -544,6 +562,23 @@ def _extract_user_focus_text(text: str) -> str:
         if collecting and (
             stripped.startswith("## AI 세션")
             or stripped.startswith("**AI**:")
+            or stripped.startswith("### 내 생각")
+        ):
+            if current_block:
+                user_blocks.append("\n".join(current_block))
+            current_block = []
+            collecting = False
+            if not stripped.startswith("### 내 생각"):
+                continue
+        if stripped.startswith("### 내 생각"):
+            if current_block:
+                user_blocks.append("\n".join(current_block))
+            current_block = [line]
+            collecting = True
+            continue
+        if collecting and (
+            stripped.startswith("## ")
+            or (stripped.startswith("### ") and not stripped.startswith("### 내 생각"))
         ):
             if current_block:
                 user_blocks.append("\n".join(current_block))
@@ -561,12 +596,12 @@ def _extract_user_focus_text(text: str) -> str:
     return _compress_session_text(text)[:1200]
 
 
-def build_compact_sonnet_draft_prompt(
+def build_compact_synthesis_draft_prompt(
     verdict: SessionVerdict,
-    session: HaikuSession,
+    session: CaptureSession,
 ) -> str:
     """draft 생성 실패 시 짧은 fallback 프롬프트."""
-    return COMPACT_SONNET_DRAFT_PROMPT.format(
+    return COMPACT_SYNTHESIS_DRAFT_PROMPT.format(
         session_id=verdict.session_id,
         suggested_title=verdict.suggested_title,
         core_idea=verdict.core_idea,
@@ -588,8 +623,8 @@ def verdicts_to_json(verdicts: list[SessionVerdict]) -> str:
             "suggested_title": v.suggested_title,
             "connected_themes": v.connected_themes,
         }
-        if v.sonnet_draft:
-            item["sonnet_draft"] = v.sonnet_draft
+        if v.synthesis_draft:
+            item["synthesis_draft"] = v.synthesis_draft
         sessions.append(item)
 
     return json.dumps(

@@ -1,7 +1,7 @@
 import pytest
 
 from vault_curator import evaluator
-from vault_curator.parser import HaikuSession
+from vault_curator.parser import CaptureSession
 
 
 def test_parse_verdicts_extracts_fenced_json_and_normalizes_fields() -> None:
@@ -15,7 +15,7 @@ def test_parse_verdicts_extracts_fenced_json_and_normalizes_fields() -> None:
           "core_idea": "핵심",
           "suggested_title": "제목",
           "connected_themes": "#alpha #beta",
-          "sonnet_draft": {
+          "synthesis_draft": {
             "summary": "요약",
             "thought": "문장1. 문장2. 문장3. 문장4.",
             "connections": "개념A, 개념B",
@@ -31,7 +31,7 @@ def test_parse_verdicts_extracts_fenced_json_and_normalizes_fields() -> None:
     assert len(verdicts) == 1
     verdict = verdicts[0]
     assert verdict.connected_themes == ["#alpha", "#beta"]
-    assert verdict.sonnet_draft == {
+    assert verdict.synthesis_draft == {
         "summary": "요약",
         "thought": "문장1. 문장2. 문장3. 문장4.",
         "connections": "개념A, 개념B",
@@ -48,7 +48,7 @@ def test_parse_verdicts_handles_list_themes_and_invalid_draft() -> None:
           "verdict": "borderline",
           "reasoning": "판정 이유",
           "connected_themes": ["#one", " #two ", ""],
-          "sonnet_draft": "not-a-dict"
+          "synthesis_draft": "not-a-dict"
         }
       ]
     }
@@ -59,10 +59,10 @@ def test_parse_verdicts_handles_list_themes_and_invalid_draft() -> None:
     assert len(verdicts) == 1
     verdict = verdicts[0]
     assert verdict.connected_themes == ["#one", "#two"]
-    assert verdict.sonnet_draft is None
+    assert verdict.synthesis_draft is None
 
 
-def test_parse_polished_sonnet_extracts_fenced_json() -> None:
+def test_parse_polished_synthesis_extracts_fenced_json() -> None:
     text = """```json
     {
       "title": "다듬은 제목",
@@ -73,7 +73,7 @@ def test_parse_polished_sonnet_extracts_fenced_json() -> None:
     }
     ```"""
 
-    polished = evaluator.parse_polished_sonnet(text)
+    polished = evaluator.parse_polished_synthesis(text)
 
     assert polished == {
         "suggested_title": "다듬은 제목",
@@ -107,7 +107,7 @@ def test_parse_verdicts_extracts_json_inside_plain_text_wrapper() -> None:
 
 
 def test_build_prompt_compresses_long_ai_turns() -> None:
-    session = HaikuSession(
+    session = CaptureSession(
         date="2026-04-05",
         time="09:00",
         model="test-model",
@@ -119,7 +119,7 @@ def test_build_prompt_compresses_long_ai_turns() -> None:
                 "**AI**: " + ("설명 " * 200),
             ]
         ),
-        tags=["#haiku"],
+        tags=["#stage/capture"],
         user_turns=1,
         ai_turns=1,
     )
@@ -131,7 +131,7 @@ def test_build_prompt_compresses_long_ai_turns() -> None:
 
 
 def test_build_prompt_keeps_multiple_ai_lines_of_context() -> None:
-    session = HaikuSession(
+    session = CaptureSession(
         date="2026-04-05",
         time="09:00",
         model="test-model",
@@ -146,7 +146,7 @@ def test_build_prompt_keeps_multiple_ai_lines_of_context() -> None:
                 "다섯째 문장",
             ]
         ),
-        tags=["#haiku"],
+        tags=["#stage/capture"],
         user_turns=1,
         ai_turns=1,
     )
@@ -157,8 +157,36 @@ def test_build_prompt_keeps_multiple_ai_lines_of_context() -> None:
     assert "...[truncated]" in prompt
 
 
-def test_build_sonnet_draft_prompt_mentions_nathan_framing_and_source_comment() -> None:
-    session = HaikuSession(
+def test_build_prompt_preserves_manual_thought_section() -> None:
+    session = CaptureSession(
+        date="2026-04-05",
+        time="09:00",
+        model="Claude Opus 4.6",
+        raw_text="\n".join(
+            [
+                "## PDF 리서치 세션",
+                "### 핵심 발췌",
+                "AI가 요약한 본문",
+                "### 내 생각",
+                "필자의 판단은 별도로 보존되어야 한다.",
+                "이 문장은 Synthesis framing의 핵심이다.",
+                "**AI**: 보조 설명",
+            ]
+        ),
+        tags=["#stage/capture", "#from/pdf"],
+        user_turns=1,
+        ai_turns=1,
+    )
+
+    prompt = evaluator.build_prompt([session], "context")
+
+    assert "### 내 생각" in prompt
+    assert "필자의 판단은 별도로 보존되어야 한다." in prompt
+    assert "이 문장은 Synthesis framing의 핵심이다." in prompt
+
+
+def test_build_synthesis_draft_prompt_mentions_nathan_framing_and_source_comment() -> None:
+    session = CaptureSession(
         date="2026-04-05",
         time="09:00",
         model="test-model",
@@ -170,7 +198,7 @@ def test_build_sonnet_draft_prompt_mentions_nathan_framing_and_source_comment() 
                 "**AI**: 설명",
             ]
         ),
-        tags=["#haiku"],
+        tags=["#stage/capture"],
         user_turns=1,
         ai_turns=1,
     )
@@ -183,15 +211,15 @@ def test_build_sonnet_draft_prompt_mentions_nathan_framing_and_source_comment() 
         connected_themes=["#topic/test"],
     )
 
-    prompt = evaluator.build_sonnet_draft_prompt(verdict, session, "context")
+    prompt = evaluator.build_synthesis_draft_prompt(verdict, session, "context")
 
     assert "Nathan의 짧은 평가/비유/결론" in prompt
     assert "`<!-- source: ... -->`가 있으면" in prompt
     assert "<!-- source: https://x.com/test/status/123 -->" in prompt
 
 
-def test_build_compact_sonnet_draft_prompt_keeps_source_comment_in_excerpt() -> None:
-    session = HaikuSession(
+def test_build_compact_synthesis_draft_prompt_keeps_source_comment_in_excerpt() -> None:
+    session = CaptureSession(
         date="2026-04-05",
         time="09:00",
         model="test-model",
@@ -203,7 +231,7 @@ def test_build_compact_sonnet_draft_prompt_keeps_source_comment_in_excerpt() -> 
                 "**AI**: 설명",
             ]
         ),
-        tags=["#haiku"],
+        tags=["#stage/capture"],
         user_turns=1,
         ai_turns=1,
     )
@@ -216,22 +244,56 @@ def test_build_compact_sonnet_draft_prompt_keeps_source_comment_in_excerpt() -> 
         connected_themes=["#topic/test"],
     )
 
-    prompt = evaluator.build_compact_sonnet_draft_prompt(verdict, session)
+    prompt = evaluator.build_compact_synthesis_draft_prompt(verdict, session)
 
     assert "<!-- source: https://www.youtube.com/watch?v=abcdefghijk -->" in prompt
     assert "Nathan 판단의 보조 근거" in prompt
 
 
+def test_build_compact_synthesis_draft_prompt_uses_manual_thought_excerpt() -> None:
+    session = CaptureSession(
+        date="2026-04-05",
+        time="09:00",
+        model="Claude Opus 4.6",
+        raw_text="\n".join(
+            [
+                "## AI 세션 (claude.ai)",
+                "### 핵심 발췌",
+                "AI 요약",
+                "### 내 생각",
+                "필자의 독립 판단",
+                "후속 기준",
+            ]
+        ),
+        tags=["#stage/capture", "#from/claude-ai"],
+        user_turns=1,
+        ai_turns=0,
+    )
+    verdict = evaluator.SessionVerdict(
+        session_id=session.session_id,
+        verdict="strong_candidate",
+        reasoning="판정 이유",
+        core_idea="핵심 아이디어",
+        suggested_title="제목",
+        connected_themes=["#topic/test"],
+    )
+
+    prompt = evaluator.build_compact_synthesis_draft_prompt(verdict, session)
+
+    assert "### 내 생각" in prompt
+    assert "필자의 독립 판단" in prompt
+
+
 def test_split_session_batches_respects_token_budget() -> None:
     polaris_context = "context"
     sessions = [
-        HaikuSession(
+        CaptureSession(
             date="2026-04-07",
             time=f"0{i}:00",
             model="test-model",
             user_turns=2,
             ai_turns=2,
-            tags=["#haiku"],
+            tags=["#stage/capture"],
             raw_text="가" * 12000,
         )
         for i in range(1, 4)
@@ -254,13 +316,13 @@ def test_split_session_batches_respects_token_budget() -> None:
 def test_split_session_batches_keeps_small_sessions_together() -> None:
     polaris_context = "context"
     sessions = [
-        HaikuSession(
+        CaptureSession(
             date="2026-04-07",
             time=f"0{i}:00",
             model="test-model",
             user_turns=1,
             ai_turns=1,
-            tags=["#haiku"],
+            tags=["#stage/capture"],
             raw_text="짧은 세션",
         )
         for i in range(1, 4)

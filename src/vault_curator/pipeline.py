@@ -18,7 +18,7 @@ from vault_curator import (
     parser,
     preparation,
     runtime,
-    sonnet_catalog,
+    synthesis_catalog,
     state,
 )
 
@@ -34,11 +34,11 @@ class FileCycleResult:
 def run_file_cycle(
     cfg: dict,
     file: Path,
-    sessions: list[parser.HaikuSession],
+    sessions: list[parser.CaptureSession],
     polaris_ctx: str,
     model_cfg: local_client.LocalModelConfig,
     keep_result: bool,
-    polish_sonnet: bool,
+    polish_synthesis: bool,
     *,
     console: Console,
     project_dir: Path = runtime.PROJECT_DIR,
@@ -46,7 +46,7 @@ def run_file_cycle(
     result_file: Path = runtime.RESULT_FILE,
     meta_file: Path = runtime.META_FILE,
 ) -> FileCycleResult:
-    _, sonnet_dir, polaris_dir, _, _ = runtime.resolve_paths(
+    _, synthesis_dir, polaris_dir, _, _ = runtime.resolve_paths(
         cfg, project_dir=project_dir
     )
     allowed_subject_tags = context.load_subject_tags(polaris_dir)
@@ -66,7 +66,7 @@ def run_file_cycle(
         result_file=result_file,
     )
     verdicts = evaluator.parse_verdicts(result_text)
-    verdicts, draft_failures = drafting.generate_sonnet_drafts(
+    verdicts, draft_failures = drafting.generate_synthesis_drafts(
         verdicts,
         sessions,
         polaris_ctx,
@@ -74,16 +74,16 @@ def run_file_cycle(
         console=console,
     )
     verdicts = drafting.exclude_failed_draft_verdicts(verdicts, draft_failures)
-    verdicts = sonnet_catalog.normalize_verdicts(
+    verdicts = synthesis_catalog.normalize_verdicts(
         verdicts,
-        sonnet_dir,
+        synthesis_dir,
         allowed_subject_tags,
     )
     final_result_text = evaluator.verdicts_to_json(verdicts)
     result_file.write_text(final_result_text, encoding="utf-8")
 
-    if polish_sonnet:
-        polished_result = drafting.polish_sonnet_drafts(
+    if polish_synthesis:
+        polished_result = drafting.polish_synthesis_drafts(
             cfg,
             model_cfg,
             console=console,
@@ -92,9 +92,9 @@ def run_file_cycle(
         )
         if polished_result is not None:
             verdicts = evaluator.parse_verdicts(polished_result)
-            verdicts = sonnet_catalog.normalize_verdicts(
+            verdicts = synthesis_catalog.normalize_verdicts(
                 verdicts,
-                sonnet_dir,
+                synthesis_dir,
                 allowed_subject_tags,
             )
             final_result_text = evaluator.verdicts_to_json(verdicts)
@@ -137,7 +137,7 @@ def run_local_cycle(
     force: bool,
     model_cfg: local_client.LocalModelConfig,
     keep_result: bool,
-    polish_sonnet: bool,
+    polish_synthesis: bool,
     *,
     console: Console,
     project_dir: Path = runtime.PROJECT_DIR,
@@ -145,13 +145,13 @@ def run_local_cycle(
     result_file: Path = runtime.RESULT_FILE,
     meta_file: Path = runtime.META_FILE,
 ) -> bool:
-    haiku_dir, _, polaris_dir, _, _ = runtime.resolve_paths(
+    capture_dir, _, polaris_dir, _, _ = runtime.resolve_paths(
         cfg, project_dir=project_dir
     )
     polaris_ctx = context.load_polaris(polaris_dir)
     try:
         pending_inputs = preparation.select_pending_inputs(
-            haiku_dir,
+            capture_dir,
             since,
             force,
             console=console,
@@ -175,7 +175,7 @@ def run_local_cycle(
             polaris_ctx,
             model_cfg,
             keep_result,
-            polish_sonnet,
+            polish_synthesis,
             console=console,
             project_dir=project_dir,
             prompt_file=prompt_file,

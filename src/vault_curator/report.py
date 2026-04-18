@@ -1,4 +1,4 @@
-"""큐레이팅 리포트 생성 및 Sonnet 노트 작성."""
+"""큐레이팅 리포트 생성 및 Synthesis 노트 작성."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ from datetime import datetime
 from pathlib import Path
 
 from vault_curator.evaluator import SessionVerdict
-from vault_curator import sonnet_catalog
-from vault_curator.sonnet_gate import BlockedSonnetDraft, PotentialDuplicateWarning
+from vault_curator import synthesis_catalog
+from vault_curator.synthesis_gate import BlockedSynthesisDraft, PotentialDuplicateWarning
 
 _SESSION_MARKER_TEMPLATE = "<!-- vault-curator:session_id={session_id} -->"
 _LEGACY_SOURCE_TEMPLATE = re.compile(
@@ -22,7 +22,7 @@ def generate_report(
     reports_dir: Path,
     expected_session_count: int | None = None,
     deferred_sessions: dict[str, str] | None = None,
-    blocked_drafts: list[BlockedSonnetDraft] | None = None,
+    blocked_drafts: list[BlockedSynthesisDraft] | None = None,
     potential_duplicates: list[PotentialDuplicateWarning] | None = None,
 ) -> Path:
     """마크다운 리포트를 생성하고 파일 경로를 반환."""
@@ -49,7 +49,7 @@ def write_source_rollup(
     source_date: str,
     expected_session_count: int | None = None,
     deferred_sessions: dict[str, str] | None = None,
-    blocked_drafts: list[BlockedSonnetDraft] | None = None,
+    blocked_drafts: list[BlockedSynthesisDraft] | None = None,
     potential_duplicates: list[PotentialDuplicateWarning] | None = None,
 ) -> Path:
     """소스 날짜별 최신 상태를 덮어쓰는 canonical rollup을 작성."""
@@ -73,7 +73,7 @@ def _build_report_markdown(
     now: datetime,
     expected_session_count: int | None = None,
     deferred_sessions: dict[str, str] | None = None,
-    blocked_drafts: list[BlockedSonnetDraft] | None = None,
+    blocked_drafts: list[BlockedSynthesisDraft] | None = None,
     potential_duplicates: list[PotentialDuplicateWarning] | None = None,
 ) -> str:
     deferred_sessions = deferred_sessions or {}
@@ -83,7 +83,7 @@ def _build_report_markdown(
     borderline = [v for v in verdicts if v.verdict == "borderline"]
     skipped = [v for v in verdicts if v.verdict == "skip"]
     lines: list[str] = []
-    lines.append(f"# Haiku Review: {now.strftime('%Y-%m-%d %H:%M')}\n")
+    lines.append(f"# Capture Review: {now.strftime('%Y-%m-%d %H:%M')}\n")
     total_sessions = (
         expected_session_count
         if expected_session_count is not None
@@ -100,7 +100,7 @@ def _build_report_markdown(
 
     # Strong candidates
     if strong:
-        lines.append("## Sonnet 승격 후보\n")
+        lines.append("## Synthesis 승격 후보\n")
         for i, v in enumerate(strong, 1):
             lines.append(f"### {i}. {v.suggested_title} ({v.session_id})")
             lines.append(f"- **핵심:** {v.core_idea}")
@@ -175,14 +175,14 @@ def _session_marker(session_id: str) -> str:
 
 
 def _find_existing_note_path(
-    sonnet_dir: Path,
+    synthesis_dir: Path,
     session_id: str,
 ) -> Path | None:
     marker = _session_marker(session_id)
     safe_session_id = _slugify_session_id(session_id)
     legacy_matches: list[Path] = []
 
-    for path in sorted(sonnet_dir.glob("*.md")):
+    for path in sorted(synthesis_dir.glob("*.md")):
         try:
             text = path.read_text(encoding="utf-8")
         except OSError:
@@ -194,7 +194,7 @@ def _find_existing_note_path(
         if path.name.startswith(f"{safe_session_id}__") or path.stem == safe_session_id:
             return path
 
-        if "#sonnet" not in text or "#from/ai-session" not in text:
+        if not _has_synthesis_signature(text):
             continue
 
         legacy_source_pattern = re.compile(
@@ -211,27 +211,27 @@ def _slugify_session_id(session_id: str) -> str:
     return session_id.replace(":", "-")
 
 
-def write_sonnet_notes(
+def write_synthesis_notes(
     verdicts: list[SessionVerdict],
-    sonnet_dir: Path,
+    synthesis_dir: Path,
 ) -> list[Path]:
-    """strong_candidate의 sonnet_draft를 Vault/Sonnet/에 직접 작성."""
-    sonnet_dir.mkdir(parents=True, exist_ok=True)
+    """strong_candidate의 synthesis_draft를 Vault/Synthesis/에 직접 작성."""
+    synthesis_dir.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
 
     strong = [
         v
         for v in verdicts
-        if v.verdict == "strong_candidate" and v.sonnet_draft
+        if v.verdict == "strong_candidate" and v.synthesis_draft
     ]
 
     for v in strong:
-        draft = v.sonnet_draft
+        draft = v.synthesis_draft
         assert draft is not None
 
         safe_title = v.suggested_title.strip()
         safe_title = re.sub(r"\s+", "_", safe_title) if safe_title else ""
-        existing_path = _find_existing_note_path(sonnet_dir, v.session_id)
+        existing_path = _find_existing_note_path(synthesis_dir, v.session_id)
         if existing_path is not None:
             filepath = existing_path
         else:
@@ -241,10 +241,10 @@ def write_sonnet_notes(
                 if safe_title
                 else f"{safe_session_id}.md"
             )
-            filepath = sonnet_dir / filename
+            filepath = synthesis_dir / filename
 
         content = (
-            sonnet_catalog.render_sonnet_note(
+            synthesis_catalog.render_synthesis_note(
                 session_id=v.session_id,
                 title=v.suggested_title,
                 summary=draft.get("summary", ""),
@@ -259,3 +259,10 @@ def write_sonnet_notes(
         written.append(filepath)
 
     return written
+
+
+def _has_synthesis_signature(text: str) -> bool:
+    return (
+        "#from/ai-session" in text
+        and ("#stage/synthesis" in text or "#sonnet" in text)
+    )

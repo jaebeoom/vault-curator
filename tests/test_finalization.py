@@ -9,8 +9,8 @@ def _cfg(vault_root: Path) -> dict:
     return {
         "paths": {
             "vault_root": str(vault_root),
-            "haiku_dir": "Haiku",
-            "sonnet_dir": "Sonnet",
+            "capture_dir": "Capture",
+            "synthesis_dir": "Synthesis",
             "polaris_dir": "Polaris/AI",
             "reports_dir": "reports",
         }
@@ -26,8 +26,8 @@ def _write_taxonomy(vault_root: Path) -> None:
                 "# Tag Taxonomy",
                 "",
                 "## 구조 태그",
-                "- `#sonnet`",
-                "- `#haiku`",
+                "- `#stage/synthesis`",
+                "- `#stage/capture`",
                 "- `#daily`",
                 "",
                 "## 상태 태그",
@@ -60,7 +60,7 @@ def _strong_verdict(
         core_idea="핵심",
         suggested_title=title,
         connected_themes=["#tech/ai"],
-        sonnet_draft={
+        synthesis_draft={
             "summary": summary,
             "thought": thought,
             "connections": "개념1, 개념2",
@@ -69,13 +69,13 @@ def _strong_verdict(
     )
 
 
-def test_finalize_result_blocks_invalid_sonnet_and_skips_state_update(
+def test_finalize_result_blocks_invalid_synthesis_and_skips_state_update(
     tmp_path,
 ) -> None:
     project_dir = tmp_path / "project"
     vault_root = tmp_path / "Vault"
-    (vault_root / "Haiku").mkdir(parents=True)
-    (vault_root / "Sonnet").mkdir(parents=True)
+    (vault_root / "Capture").mkdir(parents=True)
+    (vault_root / "Synthesis").mkdir(parents=True)
     _write_taxonomy(vault_root)
     project_dir.mkdir()
 
@@ -109,13 +109,13 @@ def test_finalize_result_blocks_invalid_sonnet_and_skips_state_update(
         expected_session_count=2,
     )
 
-    sonnet_files = sorted((vault_root / "Sonnet").glob("*.md"))
-    assert [path.name for path in sonnet_files] == [
+    synthesis_files = sorted((vault_root / "Synthesis").glob("*.md"))
+    assert [path.name for path in synthesis_files] == [
         "2026-04-12_09-30__정상_제목.md",
         "index.md",
     ]
-    index_text = (vault_root / "Sonnet" / "index.md").read_text(encoding="utf-8")
-    assert "# Sonnet Index" in index_text
+    index_text = (vault_root / "Synthesis" / "index.md").read_text(encoding="utf-8")
+    assert "# Synthesis Index" in index_text
     assert "정상 제목" in index_text
 
     reports_dir = project_dir / "reports"
@@ -126,7 +126,7 @@ def test_finalize_result_blocks_invalid_sonnet_and_skips_state_update(
     assert "2026-04-12_09:31" in report_text
     assert "제목이 비어 있습니다." in report_text
 
-    saved_state = state.load_state(project_dir, haiku_dir=vault_root / "Haiku")
+    saved_state = state.load_state(project_dir, capture_dir=vault_root / "Capture")
     assert saved_state == {"2026-04-12_09:30": "hash-a"}
     assert not result_file.exists()
     assert not prompt_file.exists()
@@ -136,8 +136,8 @@ def test_finalize_result_blocks_invalid_sonnet_and_skips_state_update(
 def test_finalize_result_reports_blocked_count_in_console(tmp_path) -> None:
     project_dir = tmp_path / "project"
     vault_root = tmp_path / "Vault"
-    (vault_root / "Haiku").mkdir(parents=True)
-    (vault_root / "Sonnet").mkdir(parents=True)
+    (vault_root / "Capture").mkdir(parents=True)
+    (vault_root / "Synthesis").mkdir(parents=True)
     _write_taxonomy(vault_root)
     project_dir.mkdir()
 

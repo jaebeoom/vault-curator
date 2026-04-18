@@ -1,7 +1,7 @@
 from vault_curator import cli, evaluator
 from vault_curator.local_client import LocalModelError
 from vault_curator.local_client import LocalModelConfig
-from vault_curator.parser import HaikuSession
+from vault_curator.parser import CaptureSession
 
 
 def _verdict(session_id: str, verdict: str = "strong_candidate") -> evaluator.SessionVerdict:
@@ -48,13 +48,13 @@ def test_should_split_batch_on_output_token_exhaustion() -> None:
 
 def test_evaluate_session_batch_splits_on_coverage_error(monkeypatch) -> None:
     sessions = [
-        HaikuSession(
+        CaptureSession(
             date="2026-04-10",
             time="01:37",
             model="test-model",
             raw_text="## AI 세션 (01:37, test-model)\n**나**: a\n**AI**: b",
         ),
-        HaikuSession(
+        CaptureSession(
             date="2026-04-10",
             time="01:40",
             model="test-model",
@@ -114,7 +114,7 @@ def test_acquire_cli_lock_respects_live_existing_lock(
     assert cli._acquire_cli_lock() is False
 
 
-def test_generate_single_sonnet_draft_uses_compact_fallback(monkeypatch) -> None:
+def test_generate_single_synthesis_draft_uses_compact_fallback(monkeypatch) -> None:
     verdict = evaluator.SessionVerdict(
         session_id="2026-04-10_09:09",
         verdict="strong_candidate",
@@ -123,7 +123,7 @@ def test_generate_single_sonnet_draft_uses_compact_fallback(monkeypatch) -> None
         suggested_title="제목",
         connected_themes=["#tech/ai"],
     )
-    session = HaikuSession(
+    session = CaptureSession(
         date="2026-04-10",
         time="09:09",
         model="test-model",
@@ -146,7 +146,7 @@ def test_generate_single_sonnet_draft_uses_compact_fallback(monkeypatch) -> None
 
     monkeypatch.setattr(cli.local_client, "generate_json", fake_generate_json)
 
-    draft = cli._generate_single_sonnet_draft(
+    draft = cli._generate_single_synthesis_draft(
         verdict,
         session,
         "context",

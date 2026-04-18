@@ -1,7 +1,7 @@
 [paths]
 vault_root = "~/path/to/your/Vault"
-haiku_dir = "Haiku"
-sonnet_dir = "Sonnet"
+capture_dir = "Capture"
+synthesis_dir = "Synthesis"
 polaris_dir = "Polaris/AI"
 reports_dir = "reports"
 

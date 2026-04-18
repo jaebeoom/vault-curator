@@ -59,7 +59,7 @@ def should_split_batch(exc: local_client.LocalModelError) -> bool:
 
 
 def _split_batch(
-    sessions: list[parser.HaikuSession],
+    sessions: list[parser.CaptureSession],
     polaris_ctx: str,
     model_cfg: local_client.LocalModelConfig,
     batch_label: str,
@@ -90,7 +90,7 @@ def _split_batch(
 
 
 def evaluate_session_batch(
-    sessions: list[parser.HaikuSession],
+    sessions: list[parser.CaptureSession],
     polaris_ctx: str,
     model_cfg: local_client.LocalModelConfig,
     batch_label: str,
@@ -135,7 +135,7 @@ def evaluate_session_batch(
 
 
 def generate_local_result(
-    session_batches: list[list[parser.HaikuSession]],
+    session_batches: list[list[parser.CaptureSession]],
     polaris_ctx: str,
     model_cfg: local_client.LocalModelConfig,
     *,

@@ -9,7 +9,7 @@ def test_load_subject_tags_accepts_headings_with_suffix_text(tmp_path) -> None:
                 "# Tag Taxonomy",
                 "",
                 "## 구조 태그 (어디에 속하는가)",
-                "- `#sonnet`",
+                "- `#stage/synthesis`",
                 "",
                 "## 주제 태그 (무엇에 대한 것인가)",
                 "- `#tech/ai`",

@@ -23,7 +23,7 @@ from vault_curator import (
     runtime,
 )
 
-app = typer.Typer(help="Haiku → Sonnet 품질 선별 도구")
+app = typer.Typer(help="Capture → Synthesis 품질 선별 도구")
 console = Console()
 
 _PROJECT_DIR = runtime.PROJECT_DIR
@@ -60,9 +60,9 @@ TimeoutOption = Annotated[int, typer.Option(help="요청 타임아웃(초)")]
 KeepResultOption = Annotated[
     bool, typer.Option(help="원본 응답 JSON 파일을 유지")
 ]
-PolishSonnetOption = Annotated[
+PolishSynthesisOption = Annotated[
     bool,
-    typer.Option(help="strong_candidate Sonnet 초안을 한 번 더 다듬기"),
+    typer.Option(help="strong_candidate Synthesis 초안을 한 번 더 다듬기"),
 ]
 IntervalOption = Annotated[
     int | None,
@@ -113,12 +113,12 @@ def _resolve_paths(cfg: dict) -> tuple[Path, Path, Path, Path, Path]:
 
 
 def _select_pending_inputs(
-    haiku_dir: Path,
+    capture_dir: Path,
     since: str | None,
     force: bool,
-) -> list[tuple[Path, list[parser.HaikuSession]]]:
+) -> list[tuple[Path, list[parser.CaptureSession]]]:
     return preparation.select_pending_inputs(
-        haiku_dir,
+        capture_dir,
         since,
         force,
         console=console,
@@ -130,7 +130,7 @@ def _prepare_prompt(
     cfg: dict,
     since: str | None,
     force: bool,
-) -> tuple[str, list[list[parser.HaikuSession]]]:
+) -> tuple[str, list[list[parser.CaptureSession]]]:
     return preparation.prepare_prompt(
         cfg,
         since,
@@ -143,8 +143,8 @@ def _prepare_prompt(
 
 def _prepare_prompt_for_inputs(
     cfg: dict,
-    pending_inputs: list[tuple[Path, list[parser.HaikuSession]]],
-) -> tuple[str, list[list[parser.HaikuSession]]]:
+    pending_inputs: list[tuple[Path, list[parser.CaptureSession]]],
+) -> tuple[str, list[list[parser.CaptureSession]]]:
     return preparation.prepare_prompt_for_inputs(
         cfg,
         pending_inputs,
@@ -203,7 +203,7 @@ def _should_split_batch(exc: local_client.LocalModelError) -> bool:
 
 
 def _evaluate_session_batch(
-    sessions: list[parser.HaikuSession],
+    sessions: list[parser.CaptureSession],
     polaris_ctx: str,
     model_cfg: local_client.LocalModelConfig,
     batch_label: str,
@@ -217,13 +217,13 @@ def _evaluate_session_batch(
     )
 
 
-def _generate_single_sonnet_draft(
+def _generate_single_synthesis_draft(
     verdict: evaluator.SessionVerdict,
-    session: parser.HaikuSession,
+    session: parser.CaptureSession,
     polaris_ctx: str,
     model_cfg: local_client.LocalModelConfig,
 ) -> dict[str, str]:
-    return drafting.generate_single_sonnet_draft(
+    return drafting.generate_single_synthesis_draft(
         verdict,
         session,
         polaris_ctx,
@@ -248,7 +248,7 @@ def _run_local_cycle(
     force: bool,
     model_cfg: local_client.LocalModelConfig,
     keep_result: bool,
-    polish_sonnet: bool,
+    polish_synthesis: bool,
 ) -> bool:
     return pipeline.run_local_cycle(
         cfg,
@@ -256,7 +256,7 @@ def _run_local_cycle(
         force,
         model_cfg,
         keep_result,
-        polish_sonnet,
+        polish_synthesis,
         console=console,
         project_dir=_PROJECT_DIR,
         prompt_file=_PROMPT_FILE,
@@ -269,7 +269,7 @@ def prepare(
     since: SinceOption = None,
     force: ForceOption = False,
 ) -> None:
-    """Haiku를 파싱하고 평가 프롬프트를 생성합니다."""
+    """Capture를 파싱하고 평가 프롬프트를 생성합니다."""
     with _cli_lock():
         cfg = _load_config()
         _prepare_prompt(cfg, since, force)
@@ -279,7 +279,7 @@ def prepare(
 def finalize(
     result_file: ResultFileOption = None,
 ) -> None:
-    """평가 결과 JSON을 읽어 리포트와 Sonnet 노트를 생성합니다."""
+    """평가 결과 JSON을 읽어 리포트와 Synthesis 노트를 생성합니다."""
     with _cli_lock():
         cfg = _load_config()
         rfile = Path(result_file) if result_file else _RESULT_FILE
@@ -306,9 +306,9 @@ def local_run(
     temperature: TemperatureOption = 0.2,
     timeout_seconds: TimeoutOption = 180,
     keep_result: KeepResultOption = False,
-    polish_sonnet: PolishSonnetOption = True,
+    polish_synthesis: PolishSynthesisOption = True,
 ) -> None:
-    """로컬 AI로 평가를 실행하고 바로 리포트/Sonnet까지 생성합니다."""
+    """로컬 AI로 평가를 실행하고 바로 리포트/Synthesis까지 생성합니다."""
     with _cli_lock():
         cfg = _load_config()
         model_cfg = _resolve_local_model_config(
@@ -326,7 +326,7 @@ def local_run(
                 force,
                 model_cfg,
                 keep_result,
-                polish_sonnet,
+                polish_synthesis,
             )
         except local_client.LocalModelError as exc:
             console.print(f"[red]{exc}[/red]")
@@ -346,9 +346,9 @@ def watch_local(
     temperature: TemperatureOption = 0.2,
     timeout_seconds: TimeoutOption = 180,
     keep_result: KeepResultOption = False,
-    polish_sonnet: PolishSonnetOption = True,
+    polish_synthesis: PolishSynthesisOption = True,
 ) -> None:
-    """새 Haiku를 계속 감시하며 로컬 AI로 자동 큐레이팅합니다."""
+    """새 Capture를 계속 감시하며 로컬 AI로 자동 큐레이팅합니다."""
     with _cli_lock():
         cfg = _load_config()
         interval_seconds = interval_seconds or cfg.get("automation", {}).get(
@@ -376,11 +376,11 @@ def watch_local(
                     False,
                     model_cfg,
                     keep_result,
-                    polish_sonnet,
+                    polish_synthesis,
                 )
                 if not processed:
                     console.print(
-                        f"[dim]새로운 Haiku 없음. {interval_seconds}초 후 재시도[/dim]"
+                        f"[dim]새로운 Capture 없음. {interval_seconds}초 후 재시도[/dim]"
                     )
                 time.sleep(interval_seconds)
             except KeyboardInterrupt:
@@ -404,12 +404,12 @@ def watch_local(
 def doctor() -> None:
     """환경 헬스체크."""
     cfg = _load_config()
-    haiku_dir, sonnet_dir, polaris_dir, _, vault = _resolve_paths(cfg)
+    capture_dir, synthesis_dir, polaris_dir, _, vault = _resolve_paths(cfg)
 
     checks = [
         ("Vault root", vault.exists()),
-        ("Haiku dir", haiku_dir.exists()),
-        ("Sonnet dir", sonnet_dir.exists()),
+        ("Capture dir", capture_dir.exists()),
+        ("Synthesis dir", synthesis_dir.exists()),
         ("Polaris dir", polaris_dir.exists()),
         ("config.toml", (_PROJECT_DIR / "config.toml").exists()),
         ("README.md", (polaris_dir / "README.md").exists()),
@@ -419,8 +419,8 @@ def doctor() -> None:
         ("writing-voice.md", (polaris_dir / "writing-voice.md").exists()),
     ]
 
-    haiku_count = (
-        len(list(haiku_dir.glob("*.md"))) if haiku_dir.exists() else 0
+    capture_count = (
+        len(list(capture_dir.glob("*.md"))) if capture_dir.exists() else 0
     )
 
     table = Table(title="Doctor Check")
@@ -429,7 +429,7 @@ def doctor() -> None:
     for name, ok in checks:
         status = "[green]OK[/green]" if ok else "[red]FAIL[/red]"
         table.add_row(name, status)
-    table.add_row("Haiku files", f"{haiku_count}개")
+    table.add_row("Capture files", f"{capture_count}개")
 
     console.print(table)
 
