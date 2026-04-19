@@ -122,14 +122,30 @@ The CLI examples below use `python -m vault_curator.cli` with `PYTHONPATH=src` s
 
 ## Commands
 
-Run once:
+Run the same path used by unattended automation:
+
+```bash
+./scripts/daily-curate.sh
+```
+
+This wrapper loads the shared AI environment before invoking the CLI and logs
+the effective Python executable, endpoint override, and model override without
+printing secrets.
+
+By default, the wrapper looks for shared AI settings at
+`./.shared-ai.env` first and then `../.shared-ai.env`, so a workspace-level
+model selection is picked up by unattended curation runs.
+
+Run the CLI directly for development checks only. Direct CLI runs use only the
+current shell environment plus `config.toml`, so source shared model overrides
+first if you need parity with automation:
 
 ```bash
 PYTHONPATH=src uv run python -m vault_curator.cli local-run \
   --timeout-seconds 900
 ```
 
-Keep the final parsed JSON for inspection:
+Keep the final parsed JSON for inspection during direct CLI runs:
 
 ```bash
 PYTHONPATH=src uv run python -m vault_curator.cli local-run \
@@ -192,7 +208,8 @@ Recommended structure:
 
 - keep the executable working copy on a normal local path
 - keep any cloud-synced copy as a backup mirror, not as the live execution path
-- bootstrap the repo first with `uv sync` so `scripts/daily-curate.sh` can use `.venv/bin/python`
+- bootstrap the repo first with `uv sync` so `scripts/daily-curate.sh` can use the uv-managed `.venv/bin/python`
+- do not point automation at conda/miniforge environments; remove stale `VENV_DIR` or `VAULT_CURATOR_PYTHON` overrides that do
 
 This avoids common `launchd` problems with cloud-synced directories and symlinked env files.
 
@@ -220,6 +237,8 @@ For `launchd`, add them under `EnvironmentVariables` in the plist if needed:
   <string>/ABSOLUTE/PATH/TO/.venv</string>
 </dict>
 ```
+
+The default and recommended runtime is the repository-local uv environment. If a stale override points to a missing Python executable, the wrapper falls back to the uv-managed `.venv/bin/python` when it exists and logs that fallback.
 
 ## Path Notes
 

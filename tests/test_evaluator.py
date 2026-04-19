@@ -84,6 +84,37 @@ def test_parse_polished_synthesis_extracts_fenced_json() -> None:
     }
 
 
+def test_parse_polished_synthesis_normalizes_list_connections() -> None:
+    text = """{
+      "title": "다듬은 제목",
+      "summary": "요약",
+      "thought": "문장1. 문장2. 문장3. 문장4.",
+      "connections": ["개념1", " 개념2 ", ""],
+      "source": "출처"
+    }"""
+
+    polished = evaluator.parse_polished_synthesis(text)
+
+    assert polished["connections"] == "개념1\n개념2"
+
+
+def test_parse_polished_synthesis_accepts_wrapped_object_list() -> None:
+    text = """[
+      {
+        "title": "리스트로 감싼 제목",
+        "summary": "요약",
+        "thought": "문장1. 문장2. 문장3. 문장4.",
+        "connections": "개념1",
+        "source": "출처"
+      }
+    ]"""
+
+    polished = evaluator.parse_polished_synthesis(text)
+
+    assert polished["suggested_title"] == "리스트로 감싼 제목"
+    assert polished["summary"] == "요약"
+
+
 def test_parse_verdicts_extracts_json_inside_plain_text_wrapper() -> None:
     text = """
     아래가 결과입니다.

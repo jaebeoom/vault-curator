@@ -12,6 +12,61 @@ def _verdict(session_id: str, verdict: str = "strong_candidate") -> evaluator.Se
     )
 
 
+def test_resolve_local_model_resolution_reports_env_sources(monkeypatch) -> None:
+    cfg = {
+        "evaluation": {"model": "evaluation-model"},
+        "local": {
+            "base_url": "http://config.example/v1",
+            "model": "config-model",
+            "api_key": "config-key",
+        },
+    }
+    monkeypatch.setenv("OMLX_BASE_URL", "http://env.example/v1")
+    monkeypatch.setenv("OMLX_MODEL", "env-model")
+
+    resolution = cli._resolve_local_model_resolution(
+        cfg,
+        None,
+        None,
+        None,
+        0.2,
+        180,
+    )
+
+    assert resolution.config.base_url == "http://env.example/v1"
+    assert resolution.base_url_source == "env:OMLX_BASE_URL"
+    assert resolution.config.model == "env-model"
+    assert resolution.model_source == "env:OMLX_MODEL"
+    assert resolution.api_key_source == "config.toml:local.api_key"
+
+
+def test_resolve_local_model_resolution_prefers_cli_over_env(monkeypatch) -> None:
+    cfg = {
+        "evaluation": {"model": "evaluation-model"},
+        "local": {
+            "base_url": "http://config.example/v1",
+            "model": "config-model",
+        },
+    }
+    monkeypatch.setenv("OMLX_BASE_URL", "http://env.example/v1")
+    monkeypatch.setenv("OMLX_MODEL", "env-model")
+
+    resolution = cli._resolve_local_model_resolution(
+        cfg,
+        "http://cli.example/v1",
+        "cli-model",
+        "cli-key",
+        0.2,
+        180,
+    )
+
+    assert resolution.config.base_url == "http://cli.example/v1"
+    assert resolution.base_url_source == "cli:--base-url"
+    assert resolution.config.model == "cli-model"
+    assert resolution.model_source == "cli:--model"
+    assert resolution.api_key_source == "cli:--api-key"
+
+
 def test_exclude_failed_draft_verdicts_drops_only_failed_sessions() -> None:
     verdicts = [
         _verdict("2026-04-09_01:03"),
@@ -97,6 +152,112 @@ def test_evaluate_session_batch_splits_on_coverage_error(monkeypatch) -> None:
     assert [verdict.session_id for verdict in verdicts] == [
         "2026-04-10_01:37",
         "2026-04-10_01:40",
+    ]
+
+
+def test_evaluate_session_batch_repairs_time_only_session_id(monkeypatch) -> None:
+    sessions = [
+        CaptureSession(
+            date="2026-04-10",
+            time="01:37",
+            model="test-model",
+            raw_text="## AI 세션 (01:37, test-model)\n**나**: a\n**AI**: b",
+        )
+    ]
+
+    monkeypatch.setattr(
+        cli.local_client,
+        "generate_json",
+        lambda prompt, model_cfg: evaluator.verdicts_to_json(
+            [_verdict("01:37", verdict="skip")]
+        ),
+    )
+
+    verdicts = cli._evaluate_session_batch(
+        sessions,
+        "context",
+        LocalModelConfig(
+            base_url="http://127.0.0.1:8001/v1",
+            model="test-model",
+        ),
+        "배치 1/1",
+    )
+
+    assert [verdict.session_id for verdict in verdicts] == [
+        "2026-04-10_01:37",
+    ]
+
+
+def test_evaluate_session_batch_repairs_single_session_mismatch(
+    monkeypatch,
+) -> None:
+    sessions = [
+        CaptureSession(
+            date="2026-04-10",
+            time="01:37",
+            model="test-model",
+            raw_text="## AI 세션 (01:37, test-model)\n**나**: a\n**AI**: b",
+        )
+    ]
+
+    monkeypatch.setattr(
+        cli.local_client,
+        "generate_json",
+        lambda prompt, model_cfg: evaluator.verdicts_to_json(
+            [_verdict("2026-04-10_09:99", verdict="skip")]
+        ),
+    )
+
+    verdicts = cli._evaluate_session_batch(
+        sessions,
+        "context",
+        LocalModelConfig(
+            base_url="http://127.0.0.1:8001/v1",
+            model="test-model",
+        ),
+        "배치 1/1",
+    )
+
+    assert [verdict.session_id for verdict in verdicts] == [
+        "2026-04-10_01:37",
+    ]
+
+
+def test_evaluate_session_batch_drops_single_session_extra_verdict(
+    monkeypatch,
+) -> None:
+    sessions = [
+        CaptureSession(
+            date="2026-04-10",
+            time="01:37",
+            model="test-model",
+            raw_text="## AI 세션 (01:37, test-model)\n**나**: a\n**AI**: b",
+        )
+    ]
+
+    monkeypatch.setattr(
+        cli.local_client,
+        "generate_json",
+        lambda prompt, model_cfg: evaluator.verdicts_to_json(
+            [
+                _verdict("2026-04-10_01:37", verdict="skip"),
+                _verdict("06:25", verdict="borderline"),
+            ]
+        ),
+    )
+
+    verdicts = cli._evaluate_session_batch(
+        sessions,
+        "context",
+        LocalModelConfig(
+            base_url="http://127.0.0.1:8001/v1",
+            model="test-model",
+        ),
+        "배치 1/1",
+    )
+
+    assert [verdict.session_id for verdict in verdicts] == [
+        "2026-04-10_01:37",
     ]
 
 

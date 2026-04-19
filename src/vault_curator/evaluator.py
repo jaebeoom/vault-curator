@@ -60,17 +60,41 @@ def _normalize_connected_themes(value: Any) -> list[str]:
     return []
 
 
+def _normalize_draft_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, list):
+        return "\n".join(
+            str(item).strip() for item in value if str(item).strip()
+        )
+    if isinstance(value, dict):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+    return str(value).strip()
+
+
 def _normalize_synthesis_draft(value: Any) -> dict[str, str] | None:
     """모델 응답의 Synthesis draft 구조를 안전하게 정규화."""
     if not isinstance(value, dict):
         return None
 
     return {
-        "summary": str(value.get("summary", "")).strip(),
-        "thought": str(value.get("thought", "")).strip(),
-        "connections": str(value.get("connections", "")).strip(),
-        "source": str(value.get("source", "")).strip(),
+        "summary": _normalize_draft_text(value.get("summary")),
+        "thought": _normalize_draft_text(value.get("thought")),
+        "connections": _normalize_draft_text(value.get("connections")),
+        "source": _normalize_draft_text(value.get("source")),
     }
+
+
+def _normalize_polished_synthesis(value: Any) -> dict[str, Any]:
+    """Polish/draft 응답이 배열로 감싸진 경우 첫 유효 객체를 사용."""
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, list):
+        for item in value:
+            if isinstance(item, dict):
+                return item
+        return {"summary": value}
+    return {"summary": value}
 
 
 EVALUATION_PROMPT = """\
@@ -518,13 +542,13 @@ def build_polish_prompt(
 
 def parse_polished_synthesis(text: str) -> dict[str, str]:
     """Polish 단계의 JSON 응답을 파싱."""
-    data: dict[str, Any] = json.loads(_extract_json_text(text))
+    data = _normalize_polished_synthesis(json.loads(_extract_json_text(text)))
     return {
-        "suggested_title": data.get("title", "").strip(),
-        "summary": data.get("summary", "").strip(),
-        "thought": data.get("thought", "").strip(),
-        "connections": data.get("connections", "").strip(),
-        "source": data.get("source", "").strip(),
+        "suggested_title": _normalize_draft_text(data.get("title")),
+        "summary": _normalize_draft_text(data.get("summary")),
+        "thought": _normalize_draft_text(data.get("thought")),
+        "connections": _normalize_draft_text(data.get("connections")),
+        "source": _normalize_draft_text(data.get("source")),
     }
 
 

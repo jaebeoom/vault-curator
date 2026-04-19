@@ -7,7 +7,8 @@ Suggested things to record here:
 - local working copy path
 - backup mirror path
 - `uv sync` bootstrap command and any Python version notes
-- `.venv` path or `VAULT_CURATOR_PYTHON` override, if not using the default repo-local environment
+- uv-managed `.venv` path or `VAULT_CURATOR_PYTHON` override, if not using the default repo-local environment
+- stale conda/miniforge overrides to remove from launchd, `.env`, or shared env files
 - shared AI env file path
 - launchd label
 - launchd plist install path

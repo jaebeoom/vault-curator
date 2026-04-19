@@ -198,6 +198,36 @@ def _resolve_local_model_config(
     )
 
 
+def _resolve_local_model_resolution(
+    cfg: dict,
+    base_url: str | None,
+    model: str | None,
+    api_key: str | None,
+    temperature: float,
+    timeout_seconds: int,
+) -> evaluation_runner.ResolvedLocalModelConfig:
+    return evaluation_runner.resolve_local_model_resolution(
+        cfg,
+        base_url,
+        model,
+        api_key,
+        temperature,
+        timeout_seconds,
+    )
+
+
+def _print_local_model_resolution(
+    resolution: evaluation_runner.ResolvedLocalModelConfig,
+) -> None:
+    model_cfg = resolution.config
+    console.print(
+        "[dim]로컬 모델 설정:[/dim] "
+        f"{model_cfg.model} @ {model_cfg.base_url} "
+        f"(model: {resolution.model_source}, "
+        f"endpoint: {resolution.base_url_source})"
+    )
+
+
 def _should_split_batch(exc: local_client.LocalModelError) -> bool:
     return evaluation_runner.should_split_batch(exc)
 
@@ -311,7 +341,7 @@ def local_run(
     """로컬 AI로 평가를 실행하고 바로 리포트/Synthesis까지 생성합니다."""
     with _cli_lock():
         cfg = _load_config()
-        model_cfg = _resolve_local_model_config(
+        resolution = _resolve_local_model_resolution(
             cfg,
             base_url,
             model,
@@ -319,6 +349,8 @@ def local_run(
             temperature,
             timeout_seconds,
         )
+        _print_local_model_resolution(resolution)
+        model_cfg = resolution.config
         try:
             _run_local_cycle(
                 cfg,
@@ -355,7 +387,7 @@ def watch_local(
             "interval_seconds", 300
         )
         interval_seconds = max(10, interval_seconds)
-        model_cfg = _resolve_local_model_config(
+        resolution = _resolve_local_model_resolution(
             cfg,
             base_url,
             model,
@@ -363,6 +395,8 @@ def watch_local(
             temperature,
             timeout_seconds,
         )
+        _print_local_model_resolution(resolution)
+        model_cfg = resolution.config
 
         console.print(
             "[bold green]자동 큐레이팅 시작[/bold green] "
