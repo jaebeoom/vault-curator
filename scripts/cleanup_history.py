@@ -15,9 +15,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SESSION_MARKER_TEMPLATE = "<!-- vault-curator:session_id={session_id} -->"
-SESSION_ID_RE = re.compile(r"20\d{2}-\d{2}-\d{2}_\d{2}:\d{2}")
+SESSION_ID_PATTERN = r"20\d{2}-\d{2}-\d{2}_\d{2}:\d{2}(?:__[A-Za-z0-9][A-Za-z0-9-]*)?"
+SESSION_ID_RE = re.compile(SESSION_ID_PATTERN)
 REPORT_ENTRY_RE = re.compile(
-    r"^###\s+\d+\.\s+(.*?)\s+\((20\d{2}-\d{2}-\d{2}_\d{2}:\d{2})\)$",
+    rf"^###\s+\d+\.\s+(.*?)\s+\(({SESSION_ID_PATTERN})\)$",
     re.MULTILINE,
 )
 SESSION_DATE_RE = re.compile(r"(20\d{2}-\d{2}-\d{2})")
