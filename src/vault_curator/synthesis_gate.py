@@ -20,7 +20,6 @@ _SESSION_MARKER_RE = re.compile(
     r"^<!-- vault-curator:session_id=(.+?) -->\s*$",
     re.MULTILINE,
 )
-_TITLE_RE = re.compile(r"^#\s+(.+?)\s*$", re.MULTILINE)
 _LEGACY_SOURCE_TEMPLATE = re.compile(
     r"^## 출처/계기\s+.*?\b{session_id}\b",
     re.MULTILINE | re.DOTALL,
@@ -29,6 +28,17 @@ _PLACEHOLDER_TOKEN_RE = re.compile(
     r"\b(?:tbd|todo|placeholder|n/?a)\b",
     re.IGNORECASE,
 )
+_PLACEHOLDER_PHRASES = (
+    "초안 편집 대기",
+    "실제 초안 입력",
+    "초안 입력을 기다",
+    "입력 대기",
+    "입력을 기다리고",
+    "컨텍스트를 확인했으며",
+    "제공된 원본을 기다",
+)
+_UNSAFE_REWRITE_TITLE_THRESHOLD = 0.35
+_UNSAFE_REWRITE_SUMMARY_THRESHOLD = 0.35
 
 
 @dataclass(frozen=True)
@@ -51,6 +61,7 @@ class BlockedSynthesisDraft:
 class ExistingSynthesisNote:
     path: Path
     title: str
+    summary: str
     session_id: str | None
 
 
@@ -238,6 +249,20 @@ def inspect_verdict(
                     f"같은 파일명이 이미 존재하고 소유권을 확인할 수 없습니다: {existing_path.name}",
                 )
             )
+        else:
+            existing_note = _find_existing_note_record(existing_notes, existing_path)
+            if existing_note is not None and _is_risky_existing_note_rewrite(
+                existing_note,
+                title,
+                draft,
+            ):
+                issues.append(
+                    GateIssue(
+                        "unsafe_existing_note_rewrite",
+                        "기존 같은 session_id Synthesis 노트와 새 초안의 제목/요약이 크게 달라 "
+                        f"덮어쓰기를 차단합니다: {existing_path.name}",
+                    )
+                )
 
     if title:
         for note in existing_notes:
@@ -314,14 +339,18 @@ def _load_existing_notes(synthesis_dir: Path) -> list[ExistingSynthesisNote]:
             text = path.read_text(encoding="utf-8")
         except OSError:
             continue
-        notes.append(
-            ExistingSynthesisNote(
-                path=path,
-                title=_extract_title_text(text),
-                session_id=_extract_session_id_from_text(text),
-            )
-        )
+        notes.append(_parse_existing_note(path, text))
     return notes
+
+
+def _parse_existing_note(path: Path, text: str) -> ExistingSynthesisNote:
+    parsed = synthesis_catalog.parse_synthesis_note(path, text)
+    return ExistingSynthesisNote(
+        path=path,
+        title=parsed.title,
+        summary=parsed.summary,
+        session_id=parsed.session_id,
+    )
 
 
 def _count_sentences(text: str) -> int:
@@ -342,7 +371,40 @@ def _contains_placeholder_text(text: str) -> bool:
     if stripped in {"...", "…", "-", "--", "미정"}:
         return True
 
+    if any(phrase in stripped for phrase in _PLACEHOLDER_PHRASES):
+        return True
+
     return bool(_PLACEHOLDER_TOKEN_RE.search(stripped))
+
+
+def _find_existing_note_record(
+    existing_notes: list[ExistingSynthesisNote],
+    existing_path: Path,
+) -> ExistingSynthesisNote | None:
+    for note in existing_notes:
+        if note.path == existing_path:
+            return note
+    return None
+
+
+def _is_risky_existing_note_rewrite(
+    existing_note: ExistingSynthesisNote,
+    new_title: str,
+    draft: dict[str, str],
+) -> bool:
+    existing_title = existing_note.title.strip()
+    existing_summary = existing_note.summary.strip()
+    new_summary = str(draft.get("summary", "")).strip()
+
+    if not (existing_title and existing_summary and new_title and new_summary):
+        return False
+
+    title_similarity = _text_similarity(existing_title, new_title)
+    summary_similarity = _text_similarity(existing_summary, new_summary)
+    return (
+        title_similarity < _UNSAFE_REWRITE_TITLE_THRESHOLD
+        and summary_similarity < _UNSAFE_REWRITE_SUMMARY_THRESHOLD
+    )
 
 
 def _session_marker(session_id: str) -> str:
@@ -362,13 +424,6 @@ def _extract_session_id_from_text(text: str) -> str | None:
     if not match:
         return None
     return match.group(1).strip() or None
-
-
-def _extract_title_text(text: str) -> str:
-    match = _TITLE_RE.search(text)
-    if not match:
-        return ""
-    return match.group(1).strip()
 
 
 def _slugify_session_id(session_id: str) -> str:
@@ -446,10 +501,20 @@ def _find_existing_note_path(
 
 
 def _title_similarity(left: str, right: str) -> float:
+    return _text_similarity(left, right)
+
+
+def _text_similarity(left: str, right: str) -> float:
     left_norm = re.sub(r"\s+", " ", left).strip().casefold()
     right_norm = re.sub(r"\s+", " ", right).strip().casefold()
     if not left_norm or not right_norm:
         return 0.0
+    if left_norm == right_norm:
+        return 1.0
+    if left_norm in right_norm or right_norm in left_norm:
+        shorter = min(len(left_norm), len(right_norm))
+        longer = max(len(left_norm), len(right_norm))
+        return max(0.8, shorter / longer)
     return SequenceMatcher(None, left_norm, right_norm).ratio()
 
 

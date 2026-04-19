@@ -173,10 +173,11 @@ The gate currently blocks drafts when they have obvious structural problems such
 - empty title
 - missing required fields like `summary`, `thought`, or `source`
 - a `thought` body that is not exactly four sentences
-- placeholder-style text such as `TBD`
+- placeholder-style text such as `TBD` or draft-input waiting phrases
 - `connections` left as a Python-style list string
 - `connections` made only of tags
 - title or filepath conflicts with existing Synthesis notes
+- unsafe rewrites where an existing note with the same `session_id` has a title and summary that materially diverge from the new draft
 
 Blocked drafts are not written into the vault. Instead they are listed in the report under `Blocked by Admission Gate`, and they are not marked as completed in state so they can be revisited on a later run.
 

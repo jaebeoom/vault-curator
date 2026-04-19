@@ -68,6 +68,20 @@ def test_apply_admission_gate_blocks_invalid_thought_and_placeholder_text(
     }
 
 
+def test_apply_admission_gate_blocks_korean_placeholder_text(tmp_path) -> None:
+    verdict = _strong_verdict(
+        "2026-04-12_09:40",
+        title="Synthesis 초안 편집 대기 중",
+        summary="편집 규칙과 컨텍스트를 확인했으며, 실제 초안 입력을 기다리고 있습니다.",
+    )
+
+    admitted, blocked = synthesis_gate.apply_admission_gate([verdict], tmp_path)
+
+    assert admitted == []
+    assert len(blocked) == 1
+    assert {issue.code for issue in blocked[0].issues} == {"placeholder_text"}
+
+
 def test_apply_admission_gate_blocks_title_collision_with_existing_note(
     tmp_path,
 ) -> None:
@@ -101,6 +115,67 @@ def test_apply_admission_gate_allows_existing_session_note_reuse(
 
     assert admitted == [verdict]
     assert blocked == []
+
+
+def test_apply_admission_gate_allows_existing_session_note_with_matching_summary(
+    tmp_path,
+) -> None:
+    existing = tmp_path / "old-note.md"
+    existing.write_text(
+        "<!-- vault-curator:session_id=2026-04-12_09:41 -->\n"
+        "# 예전 제목\n\n"
+        "> 한 줄 요약: 같은 핵심 요약입니다.\n\n"
+        "## 생각\n\n"
+        "기존 본문입니다.\n\n"
+        "## 연결되는 것들\n\n"
+        "개념1\n\n"
+        "## 출처/계기\n\n"
+        "출처\n\n"
+        "#stage/synthesis #from/ai-session\n",
+        encoding="utf-8",
+    )
+    verdict = _strong_verdict(
+        "2026-04-12_09:41",
+        title="새 제목",
+        summary="같은 핵심 요약입니다.",
+    )
+
+    admitted, blocked = synthesis_gate.apply_admission_gate([verdict], tmp_path)
+
+    assert admitted == [verdict]
+    assert blocked == []
+
+
+def test_apply_admission_gate_blocks_risky_existing_session_overwrite(
+    tmp_path,
+) -> None:
+    existing = tmp_path / "old-note.md"
+    existing.write_text(
+        "<!-- vault-curator:session_id=2026-04-12_09:42 -->\n"
+        "# AlphaFold와 TSMC: 기술 해자보다 인프라\n\n"
+        "> 한 줄 요약: 생명과학 AI의 경쟁력은 모델 성능보다 실험 인프라와 파운드리 접근권에서 나온다.\n\n"
+        "## 생각\n\n"
+        "기존 본문입니다.\n\n"
+        "## 연결되는 것들\n\n"
+        "개념1\n\n"
+        "## 출처/계기\n\n"
+        "출처\n\n"
+        "#stage/synthesis #from/ai-session\n",
+        encoding="utf-8",
+    )
+    verdict = _strong_verdict(
+        "2026-04-12_09:42",
+        title="작업의 진입 계약과 문맥 관리",
+        summary="AI 도구 사용에서는 요청 순서와 문맥 관리가 결과 품질을 좌우한다.",
+    )
+
+    admitted, blocked = synthesis_gate.apply_admission_gate([verdict], tmp_path)
+
+    assert admitted == []
+    assert len(blocked) == 1
+    assert {issue.code for issue in blocked[0].issues} == {
+        "unsafe_existing_note_rewrite"
+    }
 
 
 def test_apply_admission_gate_blocks_existing_file_conflict(
