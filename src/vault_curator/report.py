@@ -131,6 +131,8 @@ def _build_report_markdown(
             lines.append(f"### {title} ({blocked.session_id})")
             for issue in blocked.issues:
                 lines.append(f"- {issue.message}")
+                for detail in issue.details:
+                    lines.append(f"  - {detail}")
             lines.append("")
 
     if potential_duplicates:
@@ -255,10 +257,41 @@ def write_synthesis_notes(
             )
         )
 
+        _backup_existing_note(filepath, content)
         filepath.write_text(content, encoding="utf-8")
         written.append(filepath)
 
     return written
+
+
+def _backup_existing_note(filepath: Path, new_content: str) -> Path | None:
+    if not filepath.exists():
+        return None
+
+    current = filepath.read_text(encoding="utf-8")
+    if current == new_content:
+        return None
+
+    backup_dir = filepath.parent / ".backup"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_path = _resolve_unique_backup_path(
+        backup_dir / f"{timestamp}__{filepath.name}"
+    )
+    backup_path.write_text(current, encoding="utf-8")
+    return backup_path
+
+
+def _resolve_unique_backup_path(path: Path) -> Path:
+    if not path.exists():
+        return path
+
+    suffix = 1
+    while True:
+        candidate = path.with_name(f"{path.stem}-{suffix:02d}{path.suffix}")
+        if not candidate.exists():
+            return candidate
+        suffix += 1
 
 
 def _has_synthesis_signature(text: str) -> bool:

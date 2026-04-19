@@ -23,6 +23,8 @@ The project is designed around a simple idea:
 - Synthesis admission gate that blocks structurally invalid drafts before Vault write
 - Capture의 `<!-- source: ... -->` 주석과 Nathan의 짧은 판단/비유를 Synthesis framing과 `source` 필드에 우선 반영하도록 프롬프트 보강
 - soft duplicate warnings for titles that look similar to existing Synthesis notes
+- Synthesis consistency doctor for duplicate session IDs, filename/title drift, stale index rows, placeholder text, and broken Synthesis wikilinks
+- pre-write snapshots for existing Synthesis notes before they are overwritten
 - deferred reporting when a strong candidate cannot yet be drafted safely
 - top-level `Vault/Synthesis/index.md` rebuilds from existing Synthesis notes
 - timestamped reports plus canonical by-date rollups
@@ -164,6 +166,12 @@ Environment check:
 PYTHONPATH=src uv run python -m vault_curator.cli doctor
 ```
 
+Synthesis consistency check:
+
+```bash
+PYTHONPATH=src uv run python -m vault_curator.cli doctor synthesis
+```
+
 ## Admission Gate
 
 Before a generated Synthesis note is written into `Vault/Synthesis`, `vault-curator` runs a deterministic admission gate.
@@ -181,6 +189,8 @@ The gate currently blocks drafts when they have obvious structural problems such
 
 Blocked drafts are not written into the vault. Instead they are listed in the report under `Blocked by Admission Gate`, and they are not marked as completed in state so they can be revisited on a later run.
 
+For unsafe rewrite blocks, the report includes the existing title/summary, new title/summary, and similarity scores so the mismatch can be reviewed without opening both files manually.
+
 The report can also surface soft duplicate warnings when a new strong candidate title looks similar to an existing top-level Synthesis note. These warnings do not block writes; they are meant for observation and threshold tuning.
 
 ## Synthesis Normalization
@@ -192,7 +202,19 @@ Before write, `vault-curator` normalizes generated Synthesis drafts against the 
 - unresolved items remain plain text instead of creating broken links
 - writer-managed tags such as `#stage/synthesis` and `#from/ai-session` are applied by the writer stage, while model-provided subject tags are filtered against the taxonomy
 
+When an existing Synthesis note is rewritten, the previous file content is first copied to `Vault/Synthesis/.backup/YYYYMMDD_HHMMSS__<filename>.md`.
+
 After writes, `Vault/Synthesis/index.md` is rebuilt from the current top-level Synthesis notes so the index stays idempotent across reruns.
+
+## Session ID Policy
+
+`session_id` is the stable identity for a Capture session and the ownership key for a generated Synthesis note.
+
+- normal session IDs use `YYYY-MM-DD_HH:MM`
+- duplicate same-minute Capture sessions may use `YYYY-MM-DD_HH:MM__suffix`
+- if one Capture session intentionally produces multiple independent Synthesis notes, each split note must use a distinct suffixed ID such as `YYYY-MM-DD_HH:MM__thermo-fisher`
+- do not reuse the base `session_id` for a different thesis after a Synthesis note already exists; the admission gate treats that as a rewrite of the same note
+- generated filenames should keep the session prefix and H1 title aligned: `<session_id-with-colon-as-hyphen>__<title-with-underscores>.md`
 
 ## Automation
 

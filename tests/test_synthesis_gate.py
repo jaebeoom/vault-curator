@@ -176,6 +176,10 @@ def test_apply_admission_gate_blocks_risky_existing_session_overwrite(
     assert {issue.code for issue in blocked[0].issues} == {
         "unsafe_existing_note_rewrite"
     }
+    details = blocked[0].issues[0].details
+    assert "existing_title: AlphaFold와 TSMC: 기술 해자보다 인프라" in details
+    assert "new_title: 작업의 진입 계약과 문맥 관리" in details
+    assert any(detail.startswith("summary_similarity: ") for detail in details)
 
 
 def test_apply_admission_gate_blocks_existing_file_conflict(

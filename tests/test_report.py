@@ -97,6 +97,40 @@ def test_generate_report_marks_blocked_drafts(
     assert "제목이 비어 있습니다." in text
 
 
+def test_generate_report_marks_blocked_issue_details(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setattr(report, "datetime", FixedDatetime)
+
+    blocked = [
+        synthesis_gate.BlockedSynthesisDraft(
+            verdict=_strong_verdict("2026-04-07_03:11", "새 제목"),
+            issues=(
+                synthesis_gate.GateIssue(
+                    "unsafe_existing_note_rewrite",
+                    "기존 노트 덮어쓰기를 차단합니다.",
+                    details=(
+                        "existing_title: 기존 제목",
+                        "new_title: 새 제목",
+                        "title_similarity: 0.12",
+                    ),
+                ),
+            ),
+        )
+    ]
+
+    report_path = report.generate_report(
+        [],
+        tmp_path,
+        blocked_drafts=blocked,
+    )
+
+    text = report_path.read_text(encoding="utf-8")
+    assert "- 기존 노트 덮어쓰기를 차단합니다." in text
+    assert "  - existing_title: 기존 제목" in text
+    assert "  - title_similarity: 0.12" in text
+
+
 def test_generate_report_marks_potential_duplicates(
     monkeypatch, tmp_path
 ) -> None:
@@ -167,6 +201,31 @@ def test_write_synthesis_notes_reuses_existing_session_note(tmp_path) -> None:
     assert text.startswith(
         "<!-- vault-curator:session_id=2026-04-07_03:09 -->\n# 새 제목"
     )
+
+
+def test_write_synthesis_notes_backs_up_existing_note_before_rewrite(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setattr(report, "datetime", FixedDatetime)
+    synthesis_dir = tmp_path / "Synthesis"
+    synthesis_dir.mkdir()
+    existing = synthesis_dir / "old-title.md"
+    original = (
+        "# Old Title\n\n"
+        "## 출처/계기\n\n"
+        "2026-04-07_03:09 세션에서 출발\n\n"
+        "#stage/synthesis #from/ai-session #tech/ai\n"
+    )
+    existing.write_text(original, encoding="utf-8")
+
+    verdict = _strong_verdict("2026-04-07_03:09", "새 제목")
+
+    report.write_synthesis_notes([verdict], synthesis_dir)
+
+    backup = synthesis_dir / ".backup" / "20260412_093000__old-title.md"
+    assert backup.exists()
+    assert backup.read_text(encoding="utf-8") == original
 
 
 def test_write_synthesis_notes_does_not_reuse_note_on_loose_session_mention(

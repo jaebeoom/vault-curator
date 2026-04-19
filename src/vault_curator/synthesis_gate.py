@@ -45,6 +45,7 @@ _UNSAFE_REWRITE_SUMMARY_THRESHOLD = 0.35
 class GateIssue:
     code: str
     message: str
+    details: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -63,6 +64,12 @@ class ExistingSynthesisNote:
     title: str
     summary: str
     session_id: str | None
+
+
+@dataclass(frozen=True)
+class RewriteComparison:
+    title_similarity: float
+    summary_similarity: float
 
 
 @dataclass(frozen=True)
@@ -251,16 +258,23 @@ def inspect_verdict(
             )
         else:
             existing_note = _find_existing_note_record(existing_notes, existing_path)
-            if existing_note is not None and _is_risky_existing_note_rewrite(
-                existing_note,
-                title,
-                draft,
-            ):
+            comparison = (
+                _compare_existing_note_rewrite(existing_note, title, draft)
+                if existing_note is not None
+                else None
+            )
+            if comparison is not None:
                 issues.append(
                     GateIssue(
                         "unsafe_existing_note_rewrite",
                         "기존 같은 session_id Synthesis 노트와 새 초안의 제목/요약이 크게 달라 "
                         f"덮어쓰기를 차단합니다: {existing_path.name}",
+                        details=_rewrite_conflict_details(
+                            existing_note,
+                            title,
+                            draft,
+                            comparison,
+                        ),
                     )
                 )
 
@@ -387,24 +401,56 @@ def _find_existing_note_record(
     return None
 
 
-def _is_risky_existing_note_rewrite(
+def contains_placeholder_text(text: str) -> bool:
+    return _contains_placeholder_text(text)
+
+
+def _compare_existing_note_rewrite(
     existing_note: ExistingSynthesisNote,
     new_title: str,
     draft: dict[str, str],
-) -> bool:
+) -> RewriteComparison | None:
     existing_title = existing_note.title.strip()
     existing_summary = existing_note.summary.strip()
     new_summary = str(draft.get("summary", "")).strip()
 
     if not (existing_title and existing_summary and new_title and new_summary):
-        return False
+        return None
 
     title_similarity = _text_similarity(existing_title, new_title)
     summary_similarity = _text_similarity(existing_summary, new_summary)
-    return (
+    if (
         title_similarity < _UNSAFE_REWRITE_TITLE_THRESHOLD
         and summary_similarity < _UNSAFE_REWRITE_SUMMARY_THRESHOLD
+    ):
+        return RewriteComparison(
+            title_similarity=title_similarity,
+            summary_similarity=summary_similarity,
+        )
+    return None
+
+
+def _rewrite_conflict_details(
+    existing_note: ExistingSynthesisNote,
+    new_title: str,
+    draft: dict[str, str],
+    comparison: RewriteComparison,
+) -> tuple[str, ...]:
+    return (
+        f"existing_title: {_truncate_detail(existing_note.title)}",
+        f"new_title: {_truncate_detail(new_title)}",
+        f"title_similarity: {comparison.title_similarity:.2f}",
+        f"existing_summary: {_truncate_detail(existing_note.summary)}",
+        f"new_summary: {_truncate_detail(str(draft.get('summary', '')))}",
+        f"summary_similarity: {comparison.summary_similarity:.2f}",
     )
+
+
+def _truncate_detail(text: str, limit: int = 160) -> str:
+    stripped = re.sub(r"\s+", " ", text).strip()
+    if len(stripped) <= limit:
+        return stripped
+    return f"{stripped[: limit - 1]}…"
 
 
 def _session_marker(session_id: str) -> str:

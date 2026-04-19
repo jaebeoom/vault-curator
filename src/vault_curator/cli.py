@@ -21,9 +21,12 @@ from vault_curator import (
     pipeline,
     preparation,
     runtime,
+    synthesis_doctor,
 )
 
 app = typer.Typer(help="Capture → Synthesis 품질 선별 도구")
+doctor_app = typer.Typer(help="환경과 Vault 정합성 점검")
+app.add_typer(doctor_app, name="doctor")
 console = Console()
 
 _PROJECT_DIR = runtime.PROJECT_DIR
@@ -434,9 +437,12 @@ def watch_local(
                 time.sleep(interval_seconds)
 
 
-@app.command()
-def doctor() -> None:
+@doctor_app.callback(invoke_without_command=True)
+def doctor(ctx: typer.Context) -> None:
     """환경 헬스체크."""
+    if ctx.invoked_subcommand is not None:
+        return
+
     cfg = _load_config()
     capture_dir, synthesis_dir, polaris_dir, _, vault = _resolve_paths(cfg)
 
@@ -472,6 +478,39 @@ def doctor() -> None:
     else:
         console.print("\n[bold red]일부 항목이 실패했습니다.[/bold red]")
         raise typer.Exit(1)
+
+
+@doctor_app.command("synthesis")
+def doctor_synthesis() -> None:
+    """Synthesis 노트 정합성을 점검합니다."""
+    cfg = _load_config()
+    _, synthesis_dir, _, _, _ = _resolve_paths(cfg)
+    issues = synthesis_doctor.inspect_synthesis_dir(synthesis_dir)
+
+    table = Table(title="Synthesis Doctor")
+    table.add_column("Severity")
+    table.add_column("Code")
+    table.add_column("File")
+    table.add_column("Message")
+    for issue in issues:
+        severity = (
+            "[red]error[/red]"
+            if issue.severity == "error"
+            else "[yellow]warning[/yellow]"
+        )
+        table.add_row(
+            severity,
+            issue.code,
+            issue.path.name if issue.path else "",
+            issue.message,
+        )
+
+    if issues:
+        console.print(table)
+        console.print(f"\n[bold red]Synthesis doctor: {len(issues)} issue(s)[/bold red]")
+        raise typer.Exit(1)
+
+    console.print("[bold green]Synthesis doctor: clean[/bold green]")
 
 
 if __name__ == "__main__":
