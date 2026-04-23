@@ -12,18 +12,9 @@ from pathlib import Path
 import re
 
 from vault_curator.evaluator import SessionVerdict
-from vault_curator import synthesis_catalog
+from vault_curator import synthesis_catalog, synthesis_files
 
 
-_SESSION_MARKER_TEMPLATE = "<!-- vault-curator:session_id={session_id} -->"
-_SESSION_MARKER_RE = re.compile(
-    r"^<!-- vault-curator:session_id=(.+?) -->\s*$",
-    re.MULTILINE,
-)
-_LEGACY_SOURCE_TEMPLATE = re.compile(
-    r"^## 출처/계기\s+.*?\b{session_id}\b",
-    re.MULTILINE | re.DOTALL,
-)
 _PLACEHOLDER_TOKEN_RE = re.compile(
     r"\b(?:tbd|todo|placeholder|n/?a)\b",
     re.IGNORECASE,
@@ -220,11 +211,18 @@ def inspect_verdict(
             )
         )
 
-    existing_path = _find_existing_note_path(synthesis_dir, verdict.session_id)
+    existing_path = synthesis_files.find_existing_note_path(
+        synthesis_dir,
+        verdict.session_id,
+    )
     proposed_path = (
         existing_path
         if existing_path is not None
-        else _build_new_note_path(synthesis_dir, verdict.session_id, title)
+        else synthesis_files.build_note_path(
+            synthesis_dir,
+            verdict.session_id,
+            title,
+        )
     )
 
     if existing_path is None and proposed_path.exists():
@@ -233,9 +231,9 @@ def inspect_verdict(
                 "filepath_conflict",
                 f"같은 파일명이 이미 존재합니다: {proposed_path.name}",
             )
-        )
+            )
     elif existing_path is not None:
-        existing_session_id = _extract_session_id(existing_path)
+        existing_session_id = synthesis_files.extract_session_id(existing_path)
         if (
             existing_session_id is not None
             and existing_session_id != verdict.session_id
@@ -246,7 +244,7 @@ def inspect_verdict(
                     f"재사용 대상 노트에 다른 session_id marker가 있습니다: {existing_path.name}",
                 )
             )
-        elif existing_session_id is None and not _looks_like_legacy_synthesis_note(
+        elif existing_session_id is None and not synthesis_files.looks_like_legacy_synthesis_note(
             existing_path,
             verdict.session_id,
         ):
@@ -453,99 +451,6 @@ def _truncate_detail(text: str, limit: int = 160) -> str:
     return f"{stripped[: limit - 1]}…"
 
 
-def _session_marker(session_id: str) -> str:
-    return _SESSION_MARKER_TEMPLATE.format(session_id=session_id)
-
-
-def _extract_session_id(path: Path) -> str | None:
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError:
-        return None
-    return _extract_session_id_from_text(text)
-
-
-def _extract_session_id_from_text(text: str) -> str | None:
-    match = _SESSION_MARKER_RE.search(text)
-    if not match:
-        return None
-    return match.group(1).strip() or None
-
-
-def _slugify_session_id(session_id: str) -> str:
-    return session_id.replace(":", "-")
-
-
-def _build_new_note_path(
-    synthesis_dir: Path,
-    session_id: str,
-    suggested_title: str,
-) -> Path:
-    safe_title = re.sub(r"\s+", "_", suggested_title) if suggested_title else ""
-    safe_session_id = _slugify_session_id(session_id)
-    filename = (
-        f"{safe_session_id}__{safe_title}.md"
-        if safe_title
-        else f"{safe_session_id}.md"
-    )
-    return synthesis_dir / filename
-
-
-def _looks_like_legacy_synthesis_note(path: Path, session_id: str) -> bool:
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError:
-        return False
-
-    if not _has_synthesis_signature(text):
-        return False
-
-    legacy_source_pattern = re.compile(
-        _LEGACY_SOURCE_TEMPLATE.pattern.format(session_id=re.escape(session_id)),
-        _LEGACY_SOURCE_TEMPLATE.flags,
-    )
-    return bool(legacy_source_pattern.search(text))
-
-
-def _find_existing_note_path(
-    synthesis_dir: Path,
-    session_id: str,
-) -> Path | None:
-    marker = _session_marker(session_id)
-    safe_session_id = _slugify_session_id(session_id)
-    legacy_matches: list[Path] = []
-
-    if not synthesis_dir.exists():
-        return None
-
-    for path in sorted(synthesis_dir.glob("*.md")):
-        try:
-            text = path.read_text(encoding="utf-8")
-        except OSError:
-            continue
-
-        if marker in text:
-            return path
-
-        if (
-            path.name.startswith(f"{safe_session_id}__")
-            or path.stem == safe_session_id
-        ):
-            return path
-
-        if not _has_synthesis_signature(text):
-            continue
-
-        legacy_source_pattern = re.compile(
-            _LEGACY_SOURCE_TEMPLATE.pattern.format(session_id=re.escape(session_id)),
-            _LEGACY_SOURCE_TEMPLATE.flags,
-        )
-        if legacy_source_pattern.search(text):
-            legacy_matches.append(path)
-
-    return legacy_matches[0] if len(legacy_matches) == 1 else None
-
-
 def _title_similarity(left: str, right: str) -> float:
     return _text_similarity(left, right)
 
@@ -562,10 +467,3 @@ def _text_similarity(left: str, right: str) -> float:
         longer = max(len(left_norm), len(right_norm))
         return max(0.8, shorter / longer)
     return SequenceMatcher(None, left_norm, right_norm).ratio()
-
-
-def _has_synthesis_signature(text: str) -> bool:
-    return (
-        "#from/ai-session" in text
-        and ("#stage/synthesis" in text or "#sonnet" in text)
-    )

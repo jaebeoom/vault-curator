@@ -11,6 +11,7 @@ from rich.console import Console
 from rich.table import Table
 
 from vault_curator import (
+    context,
     drafting,
     evaluation_runner,
     evaluator,
@@ -20,7 +21,9 @@ from vault_curator import (
     parser,
     pipeline,
     preparation,
+    qmd_retrieval,
     runtime,
+    synthesis_catalog,
     synthesis_doctor,
 )
 
@@ -75,14 +78,41 @@ ResultFileOption = Annotated[
     str | None,
     typer.Option(help="평가 결과 JSON 파일 경로 (기본: .curator-result.json)"),
 ]
+DryRunOption = Annotated[
+    bool,
+    typer.Option(help="파일을 쓰지 않고 변경 예정 대상만 출력"),
+]
+QmdQueryArgument = Annotated[
+    str,
+    typer.Argument(help="qmd vector query로 사용할 자연어 질문"),
+]
+QmdLexOption = Annotated[
+    str | None,
+    typer.Option(
+        "--lex",
+        help="qmd lexical query. 생략하면 query를 그대로 사용합니다.",
+    ),
+]
+QmdCollectionOption = Annotated[
+    str,
+    typer.Option("--collection", "-c", help="qmd collection 이름"),
+]
+QmdLimitOption = Annotated[
+    int,
+    typer.Option("--limit", "-n", help="검색 결과 개수"),
+]
+QmdGetLinesOption = Annotated[
+    int,
+    typer.Option(help="각 결과에서 qmd get으로 가져올 줄 수"),
+]
+QmdGetOption = Annotated[
+    bool,
+    typer.Option("--get/--no-get", help="검색 결과의 실제 문서 본문을 가져오기"),
+]
 
 
 def _is_pid_alive(pid: int) -> bool:
     return locking.is_pid_alive(pid)
-
-
-def _write_lock_pid() -> None:
-    locking.write_lock_pid(_LOCK_PID_FILE)
 
 
 def _acquire_cli_lock() -> bool:
@@ -107,116 +137,9 @@ def _cli_lock() -> Iterator[None]:
     )
 
 
-def _load_config() -> dict:
-    return runtime.load_config(console, project_dir=_PROJECT_DIR)
-
-
-def _resolve_paths(cfg: dict) -> tuple[Path, Path, Path, Path, Path]:
-    return runtime.resolve_paths(cfg, project_dir=_PROJECT_DIR)
-
-
-def _select_pending_inputs(
-    capture_dir: Path,
-    since: str | None,
-    force: bool,
-) -> list[tuple[Path, list[parser.CaptureSession]]]:
-    return preparation.select_pending_inputs(
-        capture_dir,
-        since,
-        force,
-        console=console,
-        project_dir=_PROJECT_DIR,
-    )
-
-
-def _prepare_prompt(
-    cfg: dict,
-    since: str | None,
-    force: bool,
-) -> tuple[str, list[list[parser.CaptureSession]]]:
-    return preparation.prepare_prompt(
-        cfg,
-        since,
-        force,
-        console=console,
-        project_dir=_PROJECT_DIR,
-        prompt_file=_PROMPT_FILE,
-    )
-
-
-def _prepare_prompt_for_inputs(
-    cfg: dict,
-    pending_inputs: list[tuple[Path, list[parser.CaptureSession]]],
-) -> tuple[str, list[list[parser.CaptureSession]]]:
-    return preparation.prepare_prompt_for_inputs(
-        cfg,
-        pending_inputs,
-        console=console,
-        project_dir=_PROJECT_DIR,
-        prompt_file=_PROMPT_FILE,
-    )
-
-
-def _load_expected_session_entries() -> dict[str, str]:
-    return runtime.load_expected_session_entries()
-
-
-def _finalize_result(
-    cfg: dict,
-    rfile: Path,
-    expected_session_entries: dict[str, str] | None = None,
-    expected_session_count: int | None = None,
-    deferred_sessions: dict[str, str] | None = None,
-    source_dates: list[str] | None = None,
-) -> None:
-    finalization.finalize_result(
-        cfg,
-        rfile,
-        console=console,
-        project_dir=_PROJECT_DIR,
-        prompt_file=_PROMPT_FILE,
-        result_file=_RESULT_FILE,
-        expected_session_entries=expected_session_entries,
-        expected_session_count=expected_session_count,
-        deferred_sessions=deferred_sessions,
-        source_dates=source_dates,
-    )
-
-
-def _resolve_local_model_config(
-    cfg: dict,
-    base_url: str | None,
-    model: str | None,
-    api_key: str | None,
-    temperature: float,
-    timeout_seconds: int,
-) -> local_client.LocalModelConfig:
-    return evaluation_runner.resolve_local_model_config(
-        cfg,
-        base_url,
-        model,
-        api_key,
-        temperature,
-        timeout_seconds,
-    )
-
-
-def _resolve_local_model_resolution(
-    cfg: dict,
-    base_url: str | None,
-    model: str | None,
-    api_key: str | None,
-    temperature: float,
-    timeout_seconds: int,
-) -> evaluation_runner.ResolvedLocalModelConfig:
-    return evaluation_runner.resolve_local_model_resolution(
-        cfg,
-        base_url,
-        model,
-        api_key,
-        temperature,
-        timeout_seconds,
-    )
+_resolve_local_model_resolution = evaluation_runner.resolve_local_model_resolution
+_should_split_batch = evaluation_runner.should_split_batch
+_exclude_failed_draft_verdicts = drafting.exclude_failed_draft_verdicts
 
 
 def _print_local_model_resolution(
@@ -229,11 +152,6 @@ def _print_local_model_resolution(
         f"(model: {resolution.model_source}, "
         f"endpoint: {resolution.base_url_source})"
     )
-
-
-def _should_split_batch(exc: local_client.LocalModelError) -> bool:
-    return evaluation_runner.should_split_batch(exc)
-
 
 def _evaluate_session_batch(
     sessions: list[parser.CaptureSession],
@@ -265,36 +183,9 @@ def _generate_single_synthesis_draft(
     )
 
 
-def _exclude_failed_draft_verdicts(
-    verdicts: list[evaluator.SessionVerdict],
-    failed_session_ids: set[str] | dict[str, str],
-) -> list[evaluator.SessionVerdict]:
-    return drafting.exclude_failed_draft_verdicts(
-        verdicts,
-        failed_session_ids,
-    )
-
-
-def _run_local_cycle(
-    cfg: dict,
-    since: str | None,
-    force: bool,
-    model_cfg: local_client.LocalModelConfig,
-    keep_result: bool,
-    polish_synthesis: bool,
-) -> bool:
-    return pipeline.run_local_cycle(
-        cfg,
-        since,
-        force,
-        model_cfg,
-        keep_result,
-        polish_synthesis,
-        console=console,
-        project_dir=_PROJECT_DIR,
-        prompt_file=_PROMPT_FILE,
-        result_file=_RESULT_FILE,
-    )
+def _exit_with_error(exc: Exception) -> None:
+    console.print(f"[red]{exc}[/red]")
+    raise typer.Exit(1) from exc
 
 
 @app.command()
@@ -304,8 +195,15 @@ def prepare(
 ) -> None:
     """Capture를 파싱하고 평가 프롬프트를 생성합니다."""
     with _cli_lock():
-        cfg = _load_config()
-        _prepare_prompt(cfg, since, force)
+        cfg = runtime.load_config(console, project_dir=_PROJECT_DIR)
+        preparation.prepare_prompt(
+            cfg,
+            since,
+            force,
+            console=console,
+            project_dir=_PROJECT_DIR,
+            prompt_file=_PROMPT_FILE,
+        )
 
 
 @app.command()
@@ -314,7 +212,7 @@ def finalize(
 ) -> None:
     """평가 결과 JSON을 읽어 리포트와 Synthesis 노트를 생성합니다."""
     with _cli_lock():
-        cfg = _load_config()
+        cfg = runtime.load_config(console, project_dir=_PROJECT_DIR)
         rfile = Path(result_file) if result_file else _RESULT_FILE
         if not rfile.exists():
             console.print(
@@ -323,10 +221,98 @@ def finalize(
             )
             raise typer.Exit(1)
         try:
-            _finalize_result(cfg, rfile)
+            finalization.finalize_result(
+                cfg,
+                rfile,
+                console=console,
+                project_dir=_PROJECT_DIR,
+                prompt_file=_PROMPT_FILE,
+                result_file=_RESULT_FILE,
+            )
         except evaluator.VerdictCoverageError as exc:
-            console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1) from exc
+            _exit_with_error(exc)
+
+
+@app.command("backfill-synthesis-frontmatter")
+def backfill_synthesis_frontmatter(
+    dry_run: DryRunOption = True,
+) -> None:
+    """기존 top-level Synthesis 노트에 canonical YAML frontmatter를 채웁니다."""
+    with _cli_lock():
+        cfg = runtime.load_config(console, project_dir=_PROJECT_DIR)
+        _, synthesis_dir, polaris_dir, _, _ = runtime.resolve_paths(
+            cfg,
+            project_dir=_PROJECT_DIR,
+        )
+        allowed_subject_tags = context.load_subject_tags(polaris_dir)
+        changed = synthesis_catalog.backfill_synthesis_frontmatter(
+            synthesis_dir,
+            allowed_subject_tags,
+            dry_run=dry_run,
+        )
+
+        label = "변경 예정" if dry_run else "변경"
+        console.print(f"[bold]{label} Synthesis 노트:[/bold] {len(changed)}개")
+        for path in changed[:10]:
+            console.print(f"  → {path.name}")
+        if len(changed) > 10:
+            console.print(f"  … 외 {len(changed) - 10}개")
+
+        if not dry_run:
+            index_path = synthesis_catalog.write_index(synthesis_dir)
+            console.print(f"[dim]Synthesis index:[/dim] {index_path}")
+
+
+@app.command("qmd-retrieve")
+def qmd_retrieve(
+    query: QmdQueryArgument,
+    lex: QmdLexOption = None,
+    collection: QmdCollectionOption = qmd_retrieval.DEFAULT_COLLECTION,
+    limit: QmdLimitOption = qmd_retrieval.DEFAULT_LIMIT,
+    get_lines: QmdGetLinesOption = qmd_retrieval.DEFAULT_GET_LINES,
+    get: QmdGetOption = True,
+    timeout_seconds: TimeoutOption = qmd_retrieval.DEFAULT_TIMEOUT_SECONDS,
+) -> None:
+    """qmd sidecar에서 빠른 typed lex+vec 검색을 실행합니다."""
+    try:
+        if get:
+            documents = qmd_retrieval.fast_retrieve(
+                query,
+                lex=lex,
+                collection=collection,
+                limit=limit,
+                get_lines=get_lines,
+                timeout_seconds=timeout_seconds,
+            )
+            results = [document.result for document in documents]
+        else:
+            documents = []
+            results = qmd_retrieval.fast_search(
+                query,
+                lex=lex,
+                collection=collection,
+                limit=limit,
+                timeout_seconds=timeout_seconds,
+            )
+    except qmd_retrieval.QmdRetrievalError as exc:
+        _exit_with_error(exc)
+
+    table = Table(title=f"qmd retrieval: {collection}")
+    table.add_column("Score", justify="right")
+    table.add_column("Title")
+    table.add_column("File")
+    for result in results:
+        table.add_row(
+            f"{result.score:.3g}",
+            result.title,
+            result.file,
+        )
+    console.print(table)
+
+    for document in documents:
+        title = document.result.title or document.result.file
+        console.rule(title)
+        console.print(document.text.rstrip())
 
 
 @app.command("local-run")
@@ -343,7 +329,7 @@ def local_run(
 ) -> None:
     """로컬 AI로 평가를 실행하고 바로 리포트/Synthesis까지 생성합니다."""
     with _cli_lock():
-        cfg = _load_config()
+        cfg = runtime.load_config(console, project_dir=_PROJECT_DIR)
         resolution = _resolve_local_model_resolution(
             cfg,
             base_url,
@@ -355,20 +341,20 @@ def local_run(
         _print_local_model_resolution(resolution)
         model_cfg = resolution.config
         try:
-            _run_local_cycle(
+            pipeline.run_local_cycle(
                 cfg,
                 since,
                 force,
                 model_cfg,
                 keep_result,
                 polish_synthesis,
+                console=console,
+                project_dir=_PROJECT_DIR,
+                prompt_file=_PROMPT_FILE,
+                result_file=_RESULT_FILE,
             )
-        except local_client.LocalModelError as exc:
-            console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1) from exc
-        except evaluator.VerdictCoverageError as exc:
-            console.print(f"[red]{exc}[/red]")
-            raise typer.Exit(1) from exc
+        except (local_client.LocalModelError, evaluator.VerdictCoverageError) as exc:
+            _exit_with_error(exc)
 
 
 @app.command("watch-local")
@@ -385,7 +371,7 @@ def watch_local(
 ) -> None:
     """새 Capture를 계속 감시하며 로컬 AI로 자동 큐레이팅합니다."""
     with _cli_lock():
-        cfg = _load_config()
+        cfg = runtime.load_config(console, project_dir=_PROJECT_DIR)
         interval_seconds = interval_seconds or cfg.get("automation", {}).get(
             "interval_seconds", 300
         )
@@ -407,13 +393,17 @@ def watch_local(
         )
         while True:
             try:
-                processed = _run_local_cycle(
+                processed = pipeline.run_local_cycle(
                     cfg,
                     since,
                     False,
                     model_cfg,
                     keep_result,
                     polish_synthesis,
+                    console=console,
+                    project_dir=_PROJECT_DIR,
+                    prompt_file=_PROMPT_FILE,
+                    result_file=_RESULT_FILE,
                 )
                 if not processed:
                     console.print(
@@ -443,8 +433,11 @@ def doctor(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is not None:
         return
 
-    cfg = _load_config()
-    capture_dir, synthesis_dir, polaris_dir, _, vault = _resolve_paths(cfg)
+    cfg = runtime.load_config(console, project_dir=_PROJECT_DIR)
+    capture_dir, synthesis_dir, polaris_dir, _, vault = runtime.resolve_paths(
+        cfg,
+        project_dir=_PROJECT_DIR,
+    )
 
     checks = [
         ("Vault root", vault.exists()),
@@ -483,8 +476,11 @@ def doctor(ctx: typer.Context) -> None:
 @doctor_app.command("synthesis")
 def doctor_synthesis() -> None:
     """Synthesis 노트 정합성을 점검합니다."""
-    cfg = _load_config()
-    _, synthesis_dir, _, _, _ = _resolve_paths(cfg)
+    cfg = runtime.load_config(console, project_dir=_PROJECT_DIR)
+    _, synthesis_dir, _, _, _ = runtime.resolve_paths(
+        cfg,
+        project_dir=_PROJECT_DIR,
+    )
     issues = synthesis_doctor.inspect_synthesis_dir(synthesis_dir)
 
     table = Table(title="Synthesis Doctor")

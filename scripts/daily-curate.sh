@@ -117,10 +117,6 @@ fi
 
 load_env_file "$SHARED_AI_ENV"
 
-if [ -f "$PROJECT_DIR/.env" ]; then
-  load_env_file "$PROJECT_DIR/.env"
-fi
-
 VENV_DIR="${VENV_DIR:-$DEFAULT_VENV_DIR}"
 VAULT_CURATOR_PYTHON="${VAULT_CURATOR_PYTHON:-$VENV_DIR/bin/python}"
 

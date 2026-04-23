@@ -27,6 +27,7 @@ The project is designed around a simple idea:
 - pre-write snapshots for existing Synthesis notes before they are overwritten
 - deferred reporting when a strong candidate cannot yet be drafted safely
 - top-level `Vault/Synthesis/index.md` rebuilds from existing Synthesis notes
+- optional qmd retrieval adapter for fast Synthesis/Polaris sidecar search
 - timestamped reports plus canonical by-date rollups
 
 ## Workflow
@@ -55,10 +56,15 @@ The CLI is intentionally thin and delegates to focused modules:
 - `preparation.py`: pending-session selection and prompt/meta generation
 - `evaluation_runner.py`: local-model verdict execution and batch splitting
 - `drafting.py`: Synthesis draft generation, compact fallback, and polish
+- `synthesis_files.py`: shared note ownership, marker, and filename helpers
 - `synthesis_gate.py`: deterministic Synthesis admission checks before write
 - `finalization.py`: reports, Synthesis note writes, and state updates
 - `synthesis_catalog.py`: top-level Synthesis parsing, connection normalization, and index generation
+- `qmd_retrieval.py`: optional qmd sidecar retrieval with fast typed-query defaults
 - `pipeline.py`: file-level orchestration
+
+For a fuller module map and the current write-path invariants, see
+[`docs/architecture.md`](docs/architecture.md).
 
 ## Polaris Context Contract
 
@@ -86,10 +92,10 @@ OMLX_API_KEY=your-api-key
 
 The CLI prefers `OMLX_*` environment variables when present, but they are overrides rather than requirements.
 
-Project-specific overrides can still live in `.env`, but the recommended setup is:
+Recommended setup:
 
 - keep the runtime defaults in `config.toml`
-- use `.env` or an explicit shared env file only for overrides
+- use explicit shell exports or a shared env file such as `.shared-ai.env` only for overrides
 
 ## Configuration
 
@@ -138,6 +144,9 @@ By default, the wrapper looks for shared AI settings at
 `./.shared-ai.env` first and then `../.shared-ai.env`, so a workspace-level
 model selection is picked up by unattended curation runs.
 
+The wrapper does not read a repo-local `.env`. For unattended overrides, keep
+them in the shared env file or set them directly in `launchd`.
+
 Run the CLI directly for development checks only. Direct CLI runs use only the
 current shell environment plus `config.toml`, so source shared model overrides
 first if you need parity with automation:
@@ -171,6 +180,57 @@ Synthesis consistency check:
 ```bash
 PYTHONPATH=src uv run python -m vault_curator.cli doctor synthesis
 ```
+
+Fast qmd sidecar retrieval:
+
+```bash
+PYTHONPATH=src uv run python -m vault_curator.cli qmd-retrieve \
+  "기술적 에지보다 인프라 경제학이 중요하다는 노트" \
+  --lex "기술적 에지 인프라 경제학" \
+  -c synthesis \
+  -n 5 \
+  --get-lines 80
+```
+
+Use `--no-get` only when you need result metadata without fetching the source text.
+
+## qmd Retrieval Adapter
+
+qmd is an optional sidecar search layer. It is not part of the Capture →
+Synthesis generation pipeline, and `vault-curator` does not require qmd for
+normal curation runs.
+
+The adapter exists to keep automated callers from accidentally using qmd's slow
+path. Use `qmd_retrieval.fast_search`, `qmd_retrieval.fast_retrieve`, or the
+`qmd-retrieve` CLI command instead of calling plain `qmd query "..."` from
+project code.
+
+Default policy:
+
+- use qmd's typed query shape: `lex: ...` plus `vec: ...`
+- always pass a collection such as `synthesis` or `polaris`
+- pass `--json` and `--no-rerank`
+- fetch concrete documents with `qmd get` before quoting or using retrieved content
+- treat qmd output as retrieval hints; the source note remains the Vault file
+
+The current local setup expects the `qmd` binary on `PATH`, installed with one
+of the official package-manager routes:
+
+```bash
+npm install -g @tobilu/qmd
+# or
+bun add -g @tobilu/qmd
+```
+
+Known local collections:
+
+- `synthesis`: top-level `Vault/Synthesis/*.md`, excluding generated views/index files
+- `polaris`: `Vault/Polaris/**/*.md`
+
+Avoid plain `qmd query "natural language"` in automation. That form can invoke
+query expansion and download/use a generation model. Reranking is also a
+separate slow path and should be an explicit deep-retrieval choice, not the
+default.
 
 ## Admission Gate
 
@@ -263,6 +323,9 @@ For `launchd`, add them under `EnvironmentVariables` in the plist if needed:
 
 The default and recommended runtime is the repository-local uv environment. If a stale override points to a missing Python executable, the wrapper falls back to the uv-managed `.venv/bin/python` when it exists and logs that fallback.
 
+For model overrides, prefer `SHARED_AI_ENV` or `launchd` `EnvironmentVariables`
+over a repo-local `.env`.
+
 ## Path Notes
 
 If you use `launchd`, avoid running the live project directly from iCloud/Dropbox/OneDrive-managed paths.
@@ -287,6 +350,7 @@ This README is intentionally generic so it can live in a public repo.
 Recommended split:
 
 - `README.md`: public architecture, setup, commands, design notes
+- `docs/architecture.md`: module boundaries and operational invariants
 - `LOCAL_SETUP.md`: local-only paths, launchd labels, machine-specific notes
 
 `LOCAL_SETUP.md` is gitignored in this repo.

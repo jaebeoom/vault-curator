@@ -199,8 +199,14 @@ def test_write_synthesis_notes_reuses_existing_session_note(tmp_path) -> None:
     text = existing.read_text(encoding="utf-8")
     assert "<!-- vault-curator:session_id=2026-04-07_03:09 -->" in text
     assert text.startswith(
-        "<!-- vault-curator:session_id=2026-04-07_03:09 -->\n# 새 제목"
+        "---\n"
+        'title: "새 제목"\n'
+        "date: 2026-04-07\n"
+        "created_at: 2026-04-07T03:09:00\n"
+        'session_id: "2026-04-07_03:09"\n'
+        "tags:\n"
     )
+    assert "\n---\n<!-- vault-curator:session_id=2026-04-07_03:09 -->\n# 새 제목" in text
 
 
 def test_write_synthesis_notes_backs_up_existing_note_before_rewrite(
@@ -263,5 +269,5 @@ def test_write_synthesis_notes_uses_session_id_in_new_filenames(tmp_path) -> Non
         == "2026-04-07_03-09__자산의_세대교체:_원가_방어력과_고정비_부담의_트레이드오프.md"
     )
     assert written[0].read_text(encoding="utf-8").startswith(
-        "<!-- vault-curator:session_id=2026-04-07_03:09 -->"
+        "---\n"
     )

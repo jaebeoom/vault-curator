@@ -72,6 +72,83 @@ def test_normalize_existing_synthesis_notes_rewrites_connections_and_tags(
     assert "\n개념1\n" in text
     assert "#unknown" not in text
     assert text.rstrip().endswith("#stage/synthesis #from/ai-session #tech/ai")
+    assert text.startswith("---\n")
+    assert "\n---\n<!-- vault-curator:session_id=2026-04-12_09:30 -->\n# 테스트" in text
+    assert 'title: "테스트"' in text
+    assert "date: 2026-04-12" in text
+    assert "created_at: 2026-04-12T09:30:00" in text
+    assert 'session_id: "2026-04-12_09:30"' in text
+    assert "  - tech/ai" in text
+
+
+def test_parse_synthesis_note_handles_frontmatter(tmp_path) -> None:
+    text = "\n".join(
+        [
+            "---",
+            'title: "프론트매터 제목"',
+            "date: 2026-04-12",
+            "created_at: 2026-04-12T09:30:00",
+            'session_id: "2026-04-12_09:30"',
+            "tags:",
+            "  - tech/ai",
+            "---",
+            "<!-- vault-curator:session_id=2026-04-12_09:30 -->",
+            "# 프론트매터 제목",
+            "",
+            "> 한 줄 요약: 요약",
+            "",
+            "## 생각",
+            "",
+            "문장1. 문장2. 문장3. 문장4.",
+            "",
+            "## 연결되는 것들",
+            "",
+            "개념1",
+            "",
+            "## 출처/계기",
+            "",
+            "출처",
+            "",
+            "#stage/synthesis #from/ai-session #tech/ai",
+        ]
+    )
+
+    note = synthesis_catalog.parse_synthesis_note(
+        tmp_path / "2026-04-12_09-30__프론트매터_제목.md",
+        text,
+    )
+
+    assert note.has_frontmatter is True
+    assert note.title == "프론트매터 제목"
+    assert note.summary == "요약"
+    assert note.session_id == "2026-04-12_09:30"
+    assert note.created_at == "2026-04-12T09:30:00"
+    assert note.subject_tags == ("#tech/ai",)
+
+
+def test_render_synthesis_note_writes_frontmatter_before_marker() -> None:
+    text = synthesis_catalog.render_synthesis_note(
+        session_id="2026-04-12_09:30",
+        title="테스트",
+        summary="요약",
+        thought="문장1. 문장2. 문장3. 문장4.",
+        connections="개념1",
+        source="출처",
+        subject_tags=["#tech/ai"],
+    )
+
+    assert text.startswith(
+        "---\n"
+        'title: "테스트"\n'
+        "date: 2026-04-12\n"
+        "created_at: 2026-04-12T09:30:00\n"
+        'session_id: "2026-04-12_09:30"\n'
+        "tags:\n"
+        "  - tech/ai\n"
+        "---\n"
+        "<!-- vault-curator:session_id=2026-04-12_09:30 -->\n"
+        "# 테스트"
+    )
 
 
 def test_write_index_builds_table_for_top_level_notes(tmp_path) -> None:
@@ -102,6 +179,7 @@ def test_write_index_builds_table_for_top_level_notes(tmp_path) -> None:
         ),
         encoding="utf-8",
     )
+    (synthesis_dir / "views.md").write_text("# Views\n", encoding="utf-8")
 
     index_path = synthesis_catalog.write_index(
         synthesis_dir,
@@ -113,3 +191,4 @@ def test_write_index_builds_table_for_top_level_notes(tmp_path) -> None:
     assert "# Synthesis Index" in text
     assert "마지막 업데이트: 2026-04-14" in text
     assert "[[2026-04-12_09-30__테스트|테스트]]" in text
+    assert "views" not in text

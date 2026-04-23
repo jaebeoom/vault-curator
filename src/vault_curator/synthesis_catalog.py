@@ -33,6 +33,10 @@ _SUMMARY_RE = re.compile(r"^> 한 줄 요약:\s*(.+?)\s*$", re.MULTILINE)
 _SECTION_RE_TEMPLATE = r"^## {heading}\s+(.*?)(?=^## |\Z)"
 _TAG_TOKEN_RE = re.compile(r"#(?:[^\s#]+)")
 _WIKILINK_RE = re.compile(r"^\[\[(.+?)\]\]$")
+_FRONTMATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*(?:\n|\Z)", re.DOTALL)
+_SESSION_ID_CREATED_AT_RE = re.compile(
+    r"^(\d{4}-\d{2}-\d{2})_(\d{2}):(\d{2})(?:__.+)?$"
+)
 
 
 @dataclass(frozen=True)
@@ -47,6 +51,8 @@ class SynthesisNote:
     source: str
     subject_tags: tuple[str, ...]
     session_id: str | None
+    created_at: str | None = None
+    has_frontmatter: bool = False
 
 
 @dataclass(frozen=True)
@@ -56,13 +62,13 @@ class SynthesisLookup:
 
 
 def load_synthesis_notes(synthesis_dir: Path) -> list[SynthesisNote]:
-    """Parse top-level Synthesis notes, excluding the generated index."""
+    """Parse top-level Synthesis notes, excluding generated/manual view files."""
     notes: list[SynthesisNote] = []
     if not synthesis_dir.exists():
         return notes
 
     for path in sorted(synthesis_dir.glob("*.md")):
-        if path.name == "index.md":
+        if path.name in {"index.md", "views.md"}:
             continue
         try:
             text = path.read_text(encoding="utf-8")
@@ -74,21 +80,32 @@ def load_synthesis_notes(synthesis_dir: Path) -> list[SynthesisNote]:
 
 def parse_synthesis_note(path: Path, text: str) -> SynthesisNote:
     """Parse a Synthesis note into structured fields."""
-    title_match = _TITLE_RE.search(text)
-    summary_match = _SUMMARY_RE.search(text)
-    session_match = _SESSION_MARKER_RE.search(text)
+    frontmatter = _parse_frontmatter(text)
+    body = _strip_frontmatter(text)
+    title_match = _TITLE_RE.search(body)
+    summary_match = _SUMMARY_RE.search(body)
+    session_match = _SESSION_MARKER_RE.search(body)
+    frontmatter_session_id = _frontmatter_scalar(frontmatter, "session_id")
+    frontmatter_created_at = _frontmatter_scalar(frontmatter, "created_at")
+    session_id = session_match.group(1).strip() if session_match else None
+    title = title_match.group(1).strip() if title_match else ""
 
     return SynthesisNote(
         path=path,
         date=path.stem[:10],
         file_stem=path.stem,
-        title=title_match.group(1).strip() if title_match else "",
+        title=title,
         summary=summary_match.group(1).strip() if summary_match else "",
-        thought=_extract_section(text, "생각"),
-        connections=_extract_section(text, "연결되는 것들"),
-        source=_strip_trailing_tag_line(_extract_section(text, "출처/계기")),
-        subject_tags=tuple(extract_subject_tags_from_text(text)),
-        session_id=session_match.group(1).strip() if session_match else None,
+        thought=_extract_section(body, "생각"),
+        connections=_extract_section(body, "연결되는 것들"),
+        source=_strip_trailing_tag_line(_extract_section(body, "출처/계기")),
+        subject_tags=tuple(
+            extract_subject_tags_from_text(body)
+            or _frontmatter_tags_with_hash(frontmatter)
+        ),
+        session_id=session_id or frontmatter_session_id,
+        created_at=frontmatter_created_at or _created_at_from_session_id(session_id),
+        has_frontmatter=bool(frontmatter),
     )
 
 
@@ -165,6 +182,41 @@ def normalize_existing_synthesis_notes(
     return changed
 
 
+def backfill_synthesis_frontmatter(
+    synthesis_dir: Path,
+    allowed_subject_tags: set[str],
+    *,
+    dry_run: bool = False,
+) -> list[Path]:
+    """Insert canonical frontmatter into top-level Synthesis notes."""
+    changed: list[Path] = []
+    for note in load_synthesis_notes(synthesis_dir):
+        normalized_tags = normalize_subject_tags(
+            note.subject_tags,
+            allowed_subject_tags,
+        )
+        rendered = render_synthesis_note(
+            session_id=note.session_id,
+            title=note.title,
+            summary=note.summary,
+            thought=note.thought,
+            connections=note.connections,
+            source=note.source,
+            subject_tags=normalized_tags,
+        )
+
+        try:
+            current = note.path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if current == rendered:
+            continue
+        changed.append(note.path)
+        if not dry_run:
+            note.path.write_text(rendered, encoding="utf-8")
+    return changed
+
+
 def write_index(
     synthesis_dir: Path,
     *,
@@ -230,12 +282,18 @@ def render_synthesis_note(
     if tags:
         tag_line = f"{tag_line} {' '.join(tags)}"
 
+    frontmatter = _render_frontmatter(
+        title=title,
+        session_id=session_id,
+        subject_tags=tags,
+    )
     marker = (
         f"<!-- vault-curator:session_id={session_id} -->\n"
         if session_id
         else ""
     )
     return (
+        f"{frontmatter}"
         f"{marker}"
         f"# {title.strip()}\n\n"
         f"> 한 줄 요약: {summary.strip()}\n\n"
@@ -358,6 +416,124 @@ def _extract_section(text: str, heading: str) -> str:
     if not match:
         return ""
     return match.group(1).strip()
+
+
+def _strip_frontmatter(text: str) -> str:
+    match = _FRONTMATTER_RE.match(text)
+    if not match:
+        return text
+    return text[match.end() :]
+
+
+def _parse_frontmatter(text: str) -> dict[str, str | list[str]]:
+    match = _FRONTMATTER_RE.match(text)
+    if not match:
+        return {}
+
+    data: dict[str, str | list[str]] = {}
+    current_list_key: str | None = None
+    for raw_line in match.group(1).splitlines():
+        if not raw_line.strip():
+            continue
+        if current_list_key and raw_line.startswith("  - "):
+            value = _parse_yaml_scalar(raw_line[4:].strip())
+            current = data.setdefault(current_list_key, [])
+            if isinstance(current, list):
+                current.append(value)
+            continue
+
+        current_list_key = None
+        key, sep, value = raw_line.partition(":")
+        if not sep:
+            continue
+        key = key.strip()
+        value = value.strip()
+        if not key:
+            continue
+        if value:
+            data[key] = _parse_yaml_scalar(value)
+        else:
+            data[key] = []
+            current_list_key = key
+    return data
+
+
+def _frontmatter_tags_with_hash(
+    frontmatter: dict[str, str | list[str]],
+) -> list[str]:
+    raw_tags = frontmatter.get("tags")
+    if not isinstance(raw_tags, list):
+        return []
+    return normalize_subject_tags(
+        [
+            tag if str(tag).startswith("#") else f"#{tag}"
+            for tag in raw_tags
+        ],
+        set(),
+    )
+
+
+def _frontmatter_scalar(
+    frontmatter: dict[str, str | list[str]],
+    key: str,
+) -> str | None:
+    value = frontmatter.get(key)
+    return value if isinstance(value, str) else None
+
+
+def _parse_yaml_scalar(value: str) -> str:
+    if len(value) >= 2 and value[0] == value[-1] == '"':
+        return value[1:-1].replace(r"\"", '"').replace(r"\\", "\\")
+    return value
+
+
+def _render_frontmatter(
+    *,
+    title: str,
+    session_id: str | None,
+    subject_tags: Iterable[str],
+) -> str:
+    date = _date_from_session_id(session_id)
+    created_at = _created_at_from_session_id(session_id)
+    lines = [
+        "---",
+        f"title: {_quote_yaml_string(title.strip())}",
+        f"date: {date}" if date else 'date: ""',
+        f"created_at: {created_at}" if created_at else 'created_at: ""',
+        f"session_id: {_quote_yaml_string(session_id or '')}",
+    ]
+    tag_values = [_frontmatter_tag_value(tag) for tag in subject_tags]
+    if tag_values:
+        lines.append("tags:")
+        lines.extend(f"  - {tag}" for tag in tag_values)
+    else:
+        lines.append("tags: []")
+    lines.extend(["---", ""])
+    return "\n".join(lines)
+
+
+def _quote_yaml_string(value: str) -> str:
+    escaped = value.replace("\\", r"\\").replace('"', r"\"")
+    return f'"{escaped}"'
+
+
+def _frontmatter_tag_value(tag: str) -> str:
+    return tag.strip().lstrip("#")
+
+
+def _date_from_session_id(session_id: str | None) -> str:
+    match = _SESSION_ID_CREATED_AT_RE.match(session_id or "")
+    if not match:
+        return ""
+    return match.group(1)
+
+
+def _created_at_from_session_id(session_id: str | None) -> str:
+    match = _SESSION_ID_CREATED_AT_RE.match(session_id or "")
+    if not match:
+        return ""
+    date, hour, minute = match.groups()
+    return f"{date}T{hour}:{minute}:00"
 
 
 def _extract_last_tag_line(text: str) -> str:
